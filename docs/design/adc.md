@@ -103,8 +103,12 @@ class WlAdc;
 `Delay` supplies `init()` and `wait_us(uint32_t)`. `Irq` supplies
 `enable/disable/clear_pending/set_priority`. Both are compile-time policies, so
 an application can inject its own timer/tick or NVIC wrapper without changing
-the ADC driver. `SysTickDelay` is the reference implementation: a polled 1 MHz
-SysTick down-counter with the interrupt disabled.
+the ADC driver. `SysTickDelay` is the reference implementation: a polled
+free-running 24-bit SysTick down-counter at the core clock, with the interrupt
+disabled. `wait_us()` converts microseconds to core ticks and chunks long
+delays to stay inside the 24-bit period. (A 1 MHz reload is unsafe on low-clock
+parts: at 4 MHz the reload is only 4 ticks and the modulo-24 difference wraps
+before it reaches the reload.)
 
 Family sample-time enums (the codes are the real 3-bit fields):
 
