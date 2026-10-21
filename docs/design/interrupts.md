@@ -1,26 +1,35 @@
-# Interrupts — EXTI + NVIC (WL55 first slice)
+# Interrupts — EXTI + NVIC primitives (WL55)
 
-Status: implemented (library), app integration in `wl55jc`.
+Status: implemented (primitives); board composition lives in the application
+(`wl55jc/src/app.cpp`).
 Date: 2026-10-20
 
-## Scope
+## Scope and boundary
 
-First external-interrupt slice for the NUCLEO-WL55JC:
+The library provides **mechanisms**, not board flows:
 
-- User button **B1 / BUTTON_SW1** on **PA0**.
-- **Falling edge** (press) on **EXTI line 0**.
-- **CPU1 / Cortex-M4**, IRQ `EXTI0_IRQn`.
-- Handler symbol `EXTI0_IRQHandler`.
-- ISR only clears the pending bit and sets a `volatile` flag (STA pattern);
-  the main loop toggles the user LED (PB15, active high).
+- `hw::Exti` / `WlExti`: route a GPIO line to EXTI, select edge(s), mask,
+  pending clear.
+- `hw::Nvic` / `WlNvic`: enable/disable an IRQ, set priority, clear pending.
+- `device::wl55`: **MCU facts only** — `GpioA/B/C/H` register pointers and
+  peripheral IDs.
 
-No software debounce in this slice. The board has a 1 K series resistor, ESD
-diodes and 100 nF filter caps on the button nets, and ST's BSP relies on the
-internal pull-up only.
+Board wiring and interrupt policy belong to the application:
+
+- which pin is the button (`PA0`) and which is the LED (`PB15`);
+- input/pull configuration;
+- edge polarity (`falling`);
+- IRQ priority (`15`);
+- the handler symbol (`EXTI0_IRQHandler`);
+- what the ISR does (STA flag) and what the main loop does (toggle LED).
+
+There is deliberately no `Button`/`Led` alias in `device::wl55`. A generic
+template such as `drivers::Led<HwPin>` is fine (it is parameterized by the
+consumer), but board-specific composition is not.
 
 ## Evidence
 
-- UM2592 Rev 4 §6.6.2: B1 → PA0 by default (SB16 ON, SB15 OFF).
+- UM2592 Rev 4 §6.6.2: NUCLEO-WL55JC B1 → PA0 by default (SB16 ON, SB15 OFF).
 - MB1389 schematic: 1 K series (R21–R23), ESDALC6V1-1U2, 100 nF (C68–C70) on
   the user-button nets.
 - ST BSP `stm32wlxx-nucleo-bsp@main`:
@@ -37,8 +46,7 @@ internal pull-up only.
 - Vector table: `mu` assembles ST's vendored startup in place
   (`wl55jc/Startup/NOTE.md`); `startup_stm32wl55xx_cm4.s` has
   `.weak EXTI0_IRQHandler` → `Default_Handler`, so a strong app symbol
-  overrides it at link time. No framework change needed (validated by
-  investigation).
+  overrides it at link time. No framework change needed.
 
 ## API
 
@@ -66,24 +74,58 @@ template <class Impl> class Nvic {
 }
 ```
 
-WL55 implementation:
+WL55 implementations:
 
 ```cpp
 class WlExti final : public Exti<WlExti> { /* static methods */ };
 class WlNvic final : public Nvic<WlNvic> { /* CMSIS NVIC_* wrappers */ };
 ```
 
-Device descriptor:
+## Application composition (the user's flow)
 
 ```cpp
-class ButtonSw1 {
-    static constexpr hw::Edge edge = hw::Edge::Falling;
-    static constexpr std::uint32_t irq_priority = 15;
-    static void init();          // GPIO input + pull-up + EXTI + NVIC
-    static void clear_pending(); // called from the ISR
-    static bool is_pressed();
-};
+#include <stm32/device/wl55/gpio.hpp>
+#include <stm32/hw/exti/wl55.hpp>
+#include <stm32/hw/nvic/wl55.hpp>
+
+using LedPin    = stm32::hw::Pin<stm32::device::wl55::GpioB, 15, stm32::hw::WlClock>;
+using ButtonPin = stm32::hw::Pin<stm32::device::wl55::GpioA,  0, stm32::hw::WlClock>;
+
+void app_button_init() {
+    ButtonPin::init(stm32::hw::GpioConfig{
+        stm32::hw::Mode::Input,
+        stm32::hw::OutputType::PushPull,
+        stm32::hw::Speed::Low,
+        stm32::hw::Pull::Up,
+        0,
+    });
+
+    stm32::hw::WlExti::configure<stm32::device::wl55::GpioA, 0>(
+        stm32::hw::Edge::Falling);
+    stm32::hw::WlExti::clear_pending<0>();
+    stm32::hw::WlExti::enable<0>();
+
+    stm32::hw::WlNvic::clear_pending(EXTI0_IRQn);
+    stm32::hw::WlNvic::set_priority(EXTI0_IRQn, 15);
+    stm32::hw::WlNvic::enable(EXTI0_IRQn);
+
+    LedPin::init(stm32::hw::GpioConfig{
+        stm32::hw::Mode::Output,
+        stm32::hw::OutputType::PushPull,
+        stm32::hw::Speed::Low,
+        stm32::hw::Pull::None,
+        0,
+    });
+    LedPin::reset();
+}
+
+extern "C" void EXTI0_IRQHandler(void) {
+    stm32::hw::WlExti::clear_pending<0>();
+    g_button_pressed = true;   // main loop consumes and toggles LedPin
+}
 ```
+
+The application owns the flow; the library only exposes the pieces.
 
 ## WL55 register mapping
 
@@ -99,35 +141,15 @@ class ButtonSw1 {
 All offsets and bits are CMSIS-derived (`offsetof`, `*_Pos`, `*_Msk`); no
 hardcoded register addresses or bit numbers in the generic layer.
 
-## ISR convention
-
-The vector table owns the symbol name. The application (not the library)
-defines the strong symbol:
-
-```cpp
-extern "C" void EXTI0_IRQHandler(void) {
-    stm32::device::wl55::ButtonSw1::clear_pending();
-    g_button_pressed = true;
-}
-```
-
-The library provides the register operations; it does not register callbacks
-and does not take ownership of the IRQ symbol. This keeps the `hw` layer
-stateless and lets the app choose the concurrency model.
-
 ## Validation
 
-- `tests/compile_check.cpp` compiles for Cortex-M4 and Cortex-M0+ with
-  `-Wall -Wextra -Werror`, C++20, `-fno-exceptions -fno-rtti`.
-- Disassembly of `ButtonSw1::init()` (Cortex-M4, `-Os`) shows:
-  - `RCC->AHB2ENR` @0x5800004C, bit 0 (GPIOAEN)
-  - `GPIOA->PUPDR` pull-up, `MODER` input
-  - `SYSCFG->EXTICR1` @0x40010008 field = 0 (PA)
-  - `EXTI->RTSR1` bit 0 cleared, `FTSR1` bit 0 set
-  - `EXTI->PR1` = 1, `EXTI->IMR1` bit 0 set
-  - `NVIC->ICPR0` bit 6, `NVIC->IPR6` = 0xF0, `NVIC->ISER0` bit 6
-- App link check (`wl55jc`): `g_pfnVectors` at 0x08000000; vector index 22
-  (`EXTI0_IRQn` = 6) contains 0x080002f1 → the strong `EXTI0_IRQHandler` at
-  0x080002f0 (Thumb bit), not `Default_Handler` at 0x08000354. The ISR writes
-  1 to `EXTI->PR1` and sets the flag; `app_button_poll()` toggles PB15 via
-  `BSRR`.
+- `tests/compile_check.cpp` compiles for Cortex-M4 and Cortex-M0+
+  (`-DCORE_CM0PLUS`) with `-Wall -Wextra -Werror`, C++20,
+  `-fno-exceptions -fno-rtti`.
+- App `app_button_init()` disassembly (Cortex-M4, `-Os`) matches the intended
+  writes: RCC AHB2ENR (GPIOA/GPIOB), GPIOA pull-up+input, SYSCFG EXTICR1 = PA,
+  EXTI RTSR1 bit0 clear / FTSR1 bit0 set, PR1 = 1, IMR1 bit0 set,
+  NVIC ICPR0/IPR6/ISER0 for IRQ 6, GPIOB output for PB15.
+- Link check (`wl55jc`): `g_pfnVectors` at 0x08000000; the word at 0x58
+  (`EXTI0_IRQn = 6`) points at the app's strong `EXTI0_IRQHandler`, not
+  `Default_Handler`.

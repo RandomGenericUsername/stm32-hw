@@ -2,8 +2,7 @@
 
 #include <stm32wl55xx.h>
 
-#include "stm32/hw/clock/wl55.hpp"
-#include "stm32/hw/gpio/pin.hpp"
+#include "stm32/hw/peripheral.hpp"
 
 namespace stm32::device::wl55 {
 
@@ -45,8 +44,5 @@ public:
 private:
     GpioH() = delete;
 };
-
-// Nucleo-WL55JC user LED LD1 (blue) is PB15, active high.
-using Led = hw::Pin<GpioB, 15, hw::WlClock>;
 
 } // namespace stm32::device::wl55

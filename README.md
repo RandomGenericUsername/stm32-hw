@@ -23,6 +23,9 @@ sources later; the first slice is header-only.
 - GPIO register layout lives only in the port/layout types
   (`hw::Port`, `hw::ModernLayout`).
 - A `Pin` composes a port and a clock; it owns neither.
+- `device::` contains **MCU facts only** (register pointers, peripheral IDs).
+  Board wiring and application flows — which pin is a button, pull/edge/IRQ
+  priority, ISR behavior — belong to the consuming application.
 - No register addresses, offsets, or bit numbers are hardcoded in the generic
   layers. They come from CMSIS structs, `offsetof`, and CMSIS bit-position
   macros in the family/device layer.
@@ -45,8 +48,8 @@ The WL55 headers are included as `<stm32wl55xx.h>`.
 #include <stm32/device/wl55/gpio.hpp>
 #include <stm32/drivers/led.hpp>
 
-using LedHw = stm32::device::wl55::Led;
-using Led = stm32::drivers::Led<LedHw>;
+using LedPin = stm32::hw::Pin<stm32::device::wl55::GpioB, 15, stm32::hw::WlClock>;
+using Led = stm32::drivers::Led<LedPin>;
 
 void app_main() {
     Led led;
@@ -59,7 +62,46 @@ void app_main() {
 }
 ```
 
-`LedHw` is the stateless hardware facade. `Led` is the stateful driver.
+`LedPin` is the stateless hardware facade, defined by the application. `Led` is
+the generic stateful driver. The library has no board-specific LED alias.
+
+### Interrupts
+
+The application composes the flow from primitives:
+
+```cpp
+#include <stm32/hw/exti/wl55.hpp>
+#include <stm32/hw/nvic/wl55.hpp>
+
+using ButtonPin = stm32::hw::Pin<stm32::device::wl55::GpioA, 0, stm32::hw::WlClock>;
+
+void button_init() {
+    ButtonPin::init(stm32::hw::GpioConfig{
+        stm32::hw::Mode::Input,
+        stm32::hw::OutputType::PushPull,
+        stm32::hw::Speed::Low,
+        stm32::hw::Pull::Up,
+        0,
+    });
+
+    stm32::hw::WlExti::configure<stm32::device::wl55::GpioA, 0>(
+        stm32::hw::Edge::Falling);
+    stm32::hw::WlExti::clear_pending<0>();
+    stm32::hw::WlExti::enable<0>();
+
+    stm32::hw::WlNvic::clear_pending(EXTI0_IRQn);
+    stm32::hw::WlNvic::set_priority(EXTI0_IRQn, 15);
+    stm32::hw::WlNvic::enable(EXTI0_IRQn);
+}
+
+extern "C" void EXTI0_IRQHandler(void) {
+    stm32::hw::WlExti::clear_pending<0>();
+    // signal the main loop (STA pattern)
+}
+```
+
+Pin choice, pull, edge, priority, ISR symbol, and ISR behaviour stay in the
+application.
 
 ## Build integration
 
@@ -83,7 +125,7 @@ First vertical slice:
 - GPIO: `ModernLayout`, `Port`, `Pin`
 - Device: `GpioA`, `GpioB`, `GpioC`, `GpioH`
 - Driver: stateful `Led`
-- Interrupts: `hw::Exti` / `hw::Nvic`, WL55 `WlExti` / `WlNvic`,
-  `device::wl55::ButtonSw1` (PA0, EXTI0, falling edge)
+- Interrupts: `hw::Exti` / `hw::Nvic` primitives, WL55 `WlExti` / `WlNvic`
+  (no board-specific button class)
 - Compile check: `tests/compile_check.cpp`
 - Design notes: `docs/design/interrupts.md`
