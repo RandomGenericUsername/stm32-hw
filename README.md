@@ -127,5 +127,10 @@ First vertical slice:
 - Driver: stateful `Led`
 - Interrupts: `hw::Exti` / `hw::Nvic` primitives, WL55 `WlExti` / `WlNvic`
   (no board-specific button class)
+- ADC: `hw::Adc`, `F4Adc` / `H7Adc` / `WlAdc`; device descriptors
+  `device::f4::Adc1`, `device::h7::Adc1/2/3`, `device::wl55::Adc1`;
+  12-bit single conversion, software trigger, polling
 - Compile check: `tests/compile_check.cpp`
-- Design notes: `docs/design/interrupts.md`
+- ADC compile checks: `tests/adc_compile_f4.cpp`, `adc_compile_h7.cpp`,
+  `adc_compile_wl55.cpp`
+- Design notes: `docs/design/interrupts.md`, `docs/design/adc.md`

@@ -63,9 +63,25 @@ class WlGate<Peripheral::Usart1>
           offsetof(RCC_TypeDef, APB2RSTR),
           RCC_APB2RSTR_USART1RST_Pos> {};
 
+template <>
+class WlGate<Peripheral::Adc1>
+    : public RccGate<
+          RCC_BASE,
+          offsetof(RCC_TypeDef, APB2ENR),
+          RCC_APB2ENR_ADCEN_Pos,
+          offsetof(RCC_TypeDef, APB2RSTR),
+          RCC_APB2RSTR_ADCRST_Pos> {};
+
 // WL55 clock implementation (type-level singleton).
 class WlClock final : public PeripheralClock<WlClock> {
 public:
+    enum class AdcSource : std::uint32_t {
+        None = 0,
+        Hsi16 = 1,
+        PllP = 2,
+        Sysclk = 3,
+    };
+
     WlClock() = delete;
     WlClock(const WlClock&) = delete;
     WlClock& operator=(const WlClock&) = delete;
@@ -88,6 +104,14 @@ public:
     template <Peripheral P>
     static bool is_enabled() {
         return WlGate<P>::is_enabled();
+    }
+
+    // ADC kernel clock source (RCC_CCIPR.ADCSEL). The ADC block's
+    // ADC_CCR.PRESC / CFGR2.CKMODE then scale/route this source.
+    static void select_adc_clock(AdcSource source) {
+        RCC->CCIPR = (RCC->CCIPR & ~RCC_CCIPR_ADCSEL_Msk)
+                   | (static_cast<std::uint32_t>(source)
+                      << RCC_CCIPR_ADCSEL_Pos);
     }
 };
 
