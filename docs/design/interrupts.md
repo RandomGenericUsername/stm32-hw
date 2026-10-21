@@ -126,5 +126,8 @@ stateless and lets the app choose the concurrency model.
   - `EXTI->RTSR1` bit 0 cleared, `FTSR1` bit 0 set
   - `EXTI->PR1` = 1, `EXTI->IMR1` bit 0 set
   - `NVIC->ICPR0` bit 6, `NVIC->IPR6` = 0xF0, `NVIC->ISER0` bit 6
-- App link check: vector table entry for IRQ 6 (`EXTI0_IRQn`) must point at
-  the app's `EXTI0_IRQHandler`, not `Default_Handler`.
+- App link check (`wl55jc`): `g_pfnVectors` at 0x08000000; vector index 22
+  (`EXTI0_IRQn` = 6) contains 0x080002f1 → the strong `EXTI0_IRQHandler` at
+  0x080002f0 (Thumb bit), not `Default_Handler` at 0x08000354. The ISR writes
+  1 to `EXTI->PR1` and sets the flag; `app_button_poll()` toggles PB15 via
+  `BSRR`.
