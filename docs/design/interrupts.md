@@ -127,6 +127,11 @@ extern "C" void EXTI0_IRQHandler(void) {
 
 The application owns the flow; the library only exposes the pieces.
 
+The `wl55jc` demo masks EXTI line 0 in the ISR and re-arms it 20 ms after the
+main loop consumes the press. One physical press therefore produces one toggle
+despite contact bounce, and holding the button does not repeat (falling edge
+only).
+
 ## WL55 register mapping
 
 | Concern | Register | Notes |
