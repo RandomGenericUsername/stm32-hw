@@ -327,7 +327,7 @@ Out of scope:
 |---|---|
 | F4 | APB2 gate; PCLK2/2 (8 MHz at 16 MHz HSI); ADON + 3 µs |
 | H7 | AHB1/AHB4 gate; CLKP (per_ck) /4 (16 MHz at 64 MHz HSI); BOOST 20 MHz; regulator 10 µs; calibrate; ADEN |
-| WL55 | APB2 gate; HSI16 /1 (16 MHz); async CKMODE; regulator 20 µs; calibrate; ADEN |
+| WL55 | APB2 gate; HSI16 enabled/ready then selected as kernel clock; HSI16 /1 (16 MHz); async CKMODE; regulator 20 µs; calibrate; ADEN |
 
 ## Verification plan
 

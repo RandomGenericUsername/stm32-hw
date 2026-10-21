@@ -109,6 +109,15 @@ public:
     // ADC kernel clock source (RCC_CCIPR.ADCSEL). The ADC block's
     // ADC_CCR.PRESC / CFGR2.CKMODE then scale/route this source.
     static void select_adc_clock(AdcSource source) {
+        if (source == AdcSource::Hsi16) {
+            // Reset leaves HSI16 off while the system runs from MSI. The ADC
+            // cannot calibrate or convert until its selected kernel clock is
+            // actually running.
+            RCC->CR |= RCC_CR_HSION;
+            while ((RCC->CR & RCC_CR_HSIRDY) == 0u) {
+            }
+        }
+
         RCC->CCIPR = (RCC->CCIPR & ~RCC_CCIPR_ADCSEL_Msk)
                    | (static_cast<std::uint32_t>(source)
                       << RCC_CCIPR_ADCSEL_Pos);
