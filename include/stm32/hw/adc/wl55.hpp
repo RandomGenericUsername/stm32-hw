@@ -134,6 +134,11 @@ public:
         Irq::set_priority(irq(), priority);
     }
 
+    // WL55-specific internal path: VREFINT is ADC VIN[13].
+    static void enable_vrefint() {
+        Desc::common()->CCR |= ADC_CCR_VREFEN;
+    }
+
     static constexpr IRQn_Type irq() {
         return ADC_IRQn;
     }
