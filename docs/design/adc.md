@@ -329,6 +329,34 @@ Out of scope:
 | H7 | AHB1/AHB4 gate; CLKP (per_ck) /4 (16 MHz at 64 MHz HSI); BOOST 20 MHz; regulator 10 µs; calibrate; ADEN |
 | WL55 | APB2 gate; HSI16 enabled/ready then selected as kernel clock; HSI16 /1 (16 MHz); async CKMODE; regulator 20 µs; calibrate; ADEN |
 
+## WL55 clock tree
+
+The consumer configures the system clock explicitly before enabling the ADC
+and the SysTick delay:
+
+```cpp
+stm32::hw::WlClock::use_hsi16_16mhz();
+```
+
+That gives:
+
+```text
+HSI16 16 MHz -> SYSCLK -> HCLK  = 16 MHz  (AHB  /1)
+                        -> PCLK1 = 16 MHz  (APB1 /1)
+                        -> PCLK2 = 16 MHz  (APB2 /1)
+SysTick (core clock)    = 16 MHz
+Flash latency           = 0 WS (VCORE range 1, RM0453 Table 12)
+ADC kernel clock        = HSI16 / 1 = 16 MHz, asynchronous
+                          (RCC_CCIPR.ADCSEL = HSI16,
+                           ADC_CFGR2.CKMODE = 00,
+                           ADC_CCR.PRESC = 0000)
+```
+
+`WlClock::SysclkSource` uses the real RCC_CFGR encodings from RM0453 §7.4.3:
+`MSI = 00`, `HSI16 = 01`, `HSE32 = 10`, `PLL = 11`. Do not assume
+`HSI16 = 10`; that selects HSE32 and the switch never completes if HSE32 is
+not running.
+
 ## Verification plan
 
 1. Compile checks:

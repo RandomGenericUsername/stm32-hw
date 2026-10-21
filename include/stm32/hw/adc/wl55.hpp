@@ -30,6 +30,10 @@ public:
         Cycles160_5 = 7,
     };
 
+    // Default ADC kernel clock: HSI16, asynchronous mode (CKMODE = 00),
+    // ADC_CCR.PRESC = /1. init() programs exactly this configuration.
+    static constexpr std::uint32_t clock_hz = 16000000u;
+
     WlAdc() = delete;
     WlAdc(const WlAdc&) = delete;
     WlAdc& operator=(const WlAdc&) = delete;
