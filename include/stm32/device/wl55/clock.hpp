@@ -21,35 +21,6 @@ struct ClockTraits {
         R48M,
     };
 
-    enum class AdcSource : std::uint32_t {
-        None = 0,
-        Hsi16 = 1,
-        PllP = 2,
-        Sysclk = 3,
-    };
-
-    enum class AdcClockMode : std::uint32_t {
-        Asynchronous = 0,
-        PclkDiv2 = 1,
-        PclkDiv4 = 2,
-        Pclk = 3,
-    };
-
-    enum class AdcPrescaler : std::uint32_t {
-        Div1 = 0,
-        Div2 = 1,
-        Div4 = 2,
-        Div6 = 3,
-        Div8 = 4,
-        Div10 = 5,
-        Div12 = 6,
-        Div16 = 7,
-        Div32 = 8,
-        Div64 = 9,
-        Div128 = 10,
-        Div256 = 11,
-    };
-
     struct PllConfig {
         enum class Input : std::uint8_t {
             Msi,
@@ -102,7 +73,6 @@ struct ClockTraits {
     static constexpr std::uint32_t max_hclk_hz = 48000000u;
     static constexpr std::uint32_t max_pclk1_hz = 48000000u;
     static constexpr std::uint32_t max_pclk2_hz = 48000000u;
-    static constexpr std::uint32_t max_adc_hz = 35000000u;
     static constexpr std::uint32_t max_flash_latency = 2u;
 
     static constexpr std::uint32_t msi_hz(MsiRange range) {
@@ -231,24 +201,6 @@ struct ClockTraits {
             return 1u;
         }
         return 2u;
-    }
-
-    static constexpr std::uint32_t adc_source_hz(const Source& sys_source,
-                                                 AdcSource adc_source,
-                                                 std::uint32_t hse_hz) {
-        switch (adc_source) {
-        case AdcSource::None:
-            return 0u;
-        case AdcSource::Hsi16:
-            return hsi16_hz;
-        case AdcSource::PllP:
-            return sys_source.kind == Source::Kind::Pll
-                       ? pll_p_hz(sys_source.pll_config, hse_hz)
-                       : 0u;
-        case AdcSource::Sysclk:
-            return source_hz(sys_source, hse_hz);
-        }
-        return 0u;
     }
 };
 

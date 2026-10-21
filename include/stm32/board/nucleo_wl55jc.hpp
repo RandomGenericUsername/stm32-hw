@@ -2,12 +2,14 @@
 
 #include <cstdint>
 
+#include "stm32/device/wl55/adc_clock.hpp"
 #include "stm32/device/wl55/clock.hpp"
 #include "stm32/hw/adc/clock.hpp"
 #include "stm32/hw/clock/config.hpp"
 
 namespace stm32::board::nucleo_wl55jc {
 
+using AdcClock = device::wl55::AdcClockTraits;
 using hw::AdcClockConfig;
 using hw::AhbDivider;
 using hw::ApbDivider;
@@ -29,10 +31,8 @@ struct Clock : device::wl55::ClockTraits {
         return device::wl55::ClockTraits::valid_source(source, hse_hz);
     }
 
-    static constexpr std::uint32_t adc_source_hz(
-        const Source& sys_source, AdcSource adc_source) {
-        return device::wl55::ClockTraits::adc_source_hz(
-            sys_source, adc_source, hse_hz);
+    static constexpr std::uint32_t pll_p_hz(const PllConfig& pll) {
+        return device::wl55::ClockTraits::pll_p_hz(pll, hse_hz);
     }
 };
 
@@ -79,22 +79,22 @@ static_assert(hsi16_16mhz.valid());
 static_assert(hse32_32mhz.valid());
 static_assert(pll_48mhz.valid());
 
-inline constexpr AdcClockConfig<Clock> adc_hsi16_16mhz = {
-    Clock::AdcSource::Hsi16,
-    Clock::AdcClockMode::Asynchronous,
-    Clock::AdcPrescaler::Div1,
+inline constexpr AdcClockConfig<AdcClock> adc_hsi16_16mhz = {
+    AdcClock::Source::Hsi16,
+    AdcClock::Mode::Asynchronous,
+    AdcClock::Prescaler::Div1,
 };
 
-inline constexpr AdcClockConfig<Clock> adc_pllp_32mhz = {
-    Clock::AdcSource::PllP,
-    Clock::AdcClockMode::Asynchronous,
-    Clock::AdcPrescaler::Div1,
+inline constexpr AdcClockConfig<AdcClock> adc_pllp_32mhz = {
+    AdcClock::Source::PllP,
+    AdcClock::Mode::Asynchronous,
+    AdcClock::Prescaler::Div1,
 };
 
-inline constexpr AdcClockConfig<Clock> adc_sysclk_24mhz = {
-    Clock::AdcSource::Sysclk,
-    Clock::AdcClockMode::Asynchronous,
-    Clock::AdcPrescaler::Div2,
+inline constexpr AdcClockConfig<AdcClock> adc_sysclk_24mhz = {
+    AdcClock::Source::Sysclk,
+    AdcClock::Mode::Asynchronous,
+    AdcClock::Prescaler::Div2,
 };
 
 static_assert(adc_hsi16_16mhz.valid(hsi16_16mhz));

@@ -14,24 +14,27 @@
 
 namespace stm32::hw {
 
-// Default WL55 ADC clock: HSI16 asynchronous, PRESC /1 = 16 MHz.
+// Default WL55 ADC clock policy: HSI16 asynchronous, PRESC /1 = 16 MHz.
+template <class AdcTraits>
 struct WlAdcClockDefault {
-    static constexpr AdcClockConfig<device::wl55::ClockTraits> config = {
-        device::wl55::ClockTraits::AdcSource::Hsi16,
-        device::wl55::ClockTraits::AdcClockMode::Asynchronous,
-        device::wl55::ClockTraits::AdcPrescaler::Div1,
+    static constexpr AdcClockConfig<AdcTraits> config = {
+        AdcTraits::Source::Hsi16,
+        AdcTraits::Mode::Asynchronous,
+        AdcTraits::Prescaler::Div1,
     };
 };
 
 // STM32WL55 ADC (L4-style: ISR/IER/CR/CFGR1/CFGR2/SMPR/CHSELR/DR).
 //
 // Default kernel clock: HSI16, asynchronous mode, no prescaler (16 MHz).
-// Delay and NVIC are injected policies.
+// Delay, NVIC and ADC clock are injected policies.
 template <class Desc, class Delay = SysTickDelay, class Irq = WlNvic,
-          class ClockPolicy = WlAdcClockDefault>
+          class ClockPolicy =
+              WlAdcClockDefault<typename Desc::AdcClockTraits>>
 class WlAdc final : public Adc<WlAdc<Desc, Delay, Irq, ClockPolicy>> {
 public:
     using Clock = WlClock<typename Desc::ClockTraits>;
+    using AdcTraits = typename Desc::AdcClockTraits;
     static constexpr auto adc_clock = ClockPolicy::config;
 
     enum class SampleTime : std::uint8_t {
@@ -52,7 +55,13 @@ public:
     static void init() {
         Delay::init();
         Clock::template enable<Desc::id>();
-        Clock::select_adc_clock(adc_clock.source);
+
+        // The ADC owns the source choice; RCC only writes the ADCSEL mux.
+        if (adc_clock.source == AdcTraits::Source::Hsi16) {
+            Clock::enable_hsi16();
+        }
+        Clock::select_adc_clock(
+            static_cast<std::uint32_t>(adc_clock.source));
 
         auto* adc = Desc::regs();
 

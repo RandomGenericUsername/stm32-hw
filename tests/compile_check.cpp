@@ -3,6 +3,7 @@
 // This translation unit is meant to be compiled with the consuming project's
 // CMSIS include paths. It does not need to link.
 
+#include "stm32/device/wl55/clock.hpp"
 #include "stm32/device/wl55/gpio.hpp"
 #include "stm32/drivers/led.hpp"
 #include "stm32/hw/clock/wl55.hpp"
@@ -10,8 +11,10 @@
 #include "stm32/hw/gpio/pin.hpp"
 #include "stm32/hw/nvic/wl55.hpp"
 
+using WlClock = stm32::hw::WlClock<stm32::device::wl55::ClockTraits>;
+
 // Board wiring intentionally lives here, in the consumer — not in the library.
-using LedHw = stm32::hw::Pin<stm32::device::wl55::GpioB, 15, stm32::hw::WlClock>;
+using LedHw = stm32::hw::Pin<stm32::device::wl55::GpioB, 15, WlClock>;
 using LedDriver = stm32::drivers::Led<LedHw>;
 
 void compile_check() {

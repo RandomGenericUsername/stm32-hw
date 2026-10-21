@@ -82,6 +82,12 @@ struct BasicSystemClockConfig {
         return Traits::flash_latency(hclk_hz());
     }
 
+    // PLLP is only meaningful when the system source is the PLL; otherwise
+    // this is zero. The traits type supplies the device/board frequency math.
+    constexpr std::uint32_t pll_p_hz() const {
+        return Traits::pll_p_hz(source.pll_config);
+    }
+
     constexpr bool valid() const {
         return Traits::valid_source(source)
             && sysclk_hz() <= Traits::max_sysclk_hz

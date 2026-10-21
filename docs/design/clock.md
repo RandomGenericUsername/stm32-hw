@@ -339,30 +339,57 @@ ADC:  ADC_CFGR2.CKMODE selects asynchronous or PCLK/1,2,4
       ADC_CCR.PRESC divides the asynchronous clock
 ```
 
+ADC-specific choices live in `device::wl55::AdcClockTraits`, not in the
+system `ClockTraits`:
+
+```cpp
+namespace stm32::device::wl55 {
+
+struct AdcClockTraits {
+    enum class Source : std::uint32_t { None, Hsi16, PllP, Sysclk };
+    enum class Mode : std::uint32_t {
+        Asynchronous, PclkDiv2, PclkDiv4, Pclk
+    };
+    enum class Prescaler : std::uint32_t {
+        Div1, Div2, Div4, Div6, Div8, Div10,
+        Div12, Div16, Div32, Div64, Div128, Div256
+    };
+
+    static constexpr std::uint32_t max_clock_hz = 35'000'000;
+};
+
+}
+```
+
 The config is data:
 
 ```cpp
-template <class Traits>
+template <class AdcTraits>
 struct AdcClockConfig {
-    typename Traits::AdcSource source;
-    typename Traits::AdcClockMode mode;
-    typename Traits::AdcPrescaler prescaler;
+    typename AdcTraits::Source source;
+    typename AdcTraits::Mode mode;
+    typename AdcTraits::Prescaler prescaler;
 
+    template <class ClockTraits>
     constexpr std::uint32_t clock_hz(
-        const BasicSystemClockConfig<Traits>& sys) const;
+        const BasicSystemClockConfig<ClockTraits>& sys) const;
+
+    template <class ClockTraits>
     constexpr bool valid(
-        const BasicSystemClockConfig<Traits>& sys) const;
+        const BasicSystemClockConfig<ClockTraits>& sys) const;
 };
 ```
 
 Validation:
 
-- ADC clock <= 35 MHz
+- ADC clock <= `AdcTraits::max_clock_hz` (35 MHz)
+- a non-zero clock is required
 - `PRESC` is only used in asynchronous mode
-- selected source is actually available
+- `PLLP` is only valid when the system source is the PLL
 
-The RCC mux is written by `WlClock`/family clock code. The ADC-local
-`CKMODE`/`PRESC` are written by `WlAdc`, never by the application.
+The RCC mux is written by `WlClock`/family clock code, which only receives the
+numeric `ADCSEL` code. The ADC-local `CKMODE`/`PRESC` are written by `WlAdc`,
+never by the application.
 
 To keep `AdcDriver::init()` simple, the ADC clock config is a compile-time
 policy:
@@ -370,10 +397,10 @@ policy:
 ```cpp
 struct WlAdcClockHsi16 {
     static constexpr auto config =
-        AdcClockConfig<device::wl55::ClockTraits>{
-            device::wl55::ClockTraits::AdcSource::Hsi16,
-            device::wl55::ClockTraits::AdcClockMode::Asynchronous,
-            device::wl55::ClockTraits::AdcPrescaler::Div1,
+        AdcClockConfig<device::wl55::AdcClockTraits>{
+            device::wl55::AdcClockTraits::Source::Hsi16,
+            device::wl55::AdcClockTraits::Mode::Asynchronous,
+            device::wl55::AdcClockTraits::Prescaler::Div1,
         };
 };
 
@@ -439,7 +466,7 @@ F4::Source::msi(...);
 
 ## Current WL55 state
 
-Current firmware (temporary, to be replaced by this design):
+Current firmware:
 
 ```text
 SYSCLK  = HSI16 16 MHz
@@ -450,10 +477,10 @@ SysTick = 16 MHz
 ADC     = HSI16 / 1 = 16 MHz, asynchronous
 ```
 
-Target after the refactor:
+Expressed as:
 
-- same frequencies, expressed as a `BasicSystemClockConfig<BoardClock>`
-- ADC clock expressed as an `AdcClockConfig<BoardClock>` policy
+- `BasicSystemClockConfig<board::nucleo_wl55jc::Clock>`
+- `AdcClockConfig<device::wl55::AdcClockTraits>`
 - no `use_*` functions in `hw`
 
 ## Implementation status
@@ -465,7 +492,8 @@ Implemented for WL55:
 - `BasicSystemClockConfig<Traits>`
 - `WlClock<Traits>::configure(config)`
 - constexpr WL55 configs: `msi_4mhz`, `hsi16_16mhz`, `hse32_32mhz`, `pll_48mhz`
-- `AdcClockConfig<Traits>` and `WlAdc` clock policy
+- `device::wl55::AdcClockTraits` (ADC-only source/mode/prescaler/limit)
+- `AdcClockConfig<AdcTraits>` and `WlAdc` clock policy
 - compile-time validation via `static_assert`
 
 Live-validated on NUCLEO-WL55JC:

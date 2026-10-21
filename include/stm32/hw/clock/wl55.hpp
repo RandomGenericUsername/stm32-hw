@@ -81,7 +81,6 @@ public:
     using Source = typename Traits::Source;
     using SourceKind = typename Source::Kind;
     using MsiRange = typename Traits::MsiRange;
-    using AdcSource = typename Traits::AdcSource;
     using PllConfig = typename Traits::PllConfig;
     using PllInput = typename PllConfig::Input;
 
@@ -150,19 +149,13 @@ public:
         }
     }
 
-    // ADC kernel clock source (RCC_CCIPR.ADCSEL). The ADC block's
-    // ADC_CCR.PRESC / CFGR2.CKMODE then scale/route this source.
-    static void select_adc_clock(AdcSource source) {
-        if (source == AdcSource::Hsi16) {
-            // Reset leaves HSI16 off while the system runs from MSI. The ADC
-            // cannot calibrate or convert until its selected kernel clock is
-            // actually running.
-            enable_hsi16();
-        }
-
+    // Write RCC_CCIPR.ADCSEL. The ADC layer owns the source enum and ensures
+    // the selected source is running; this function only performs the mux
+    // write, because ADCSEL is an RCC register.
+    static void select_adc_clock(std::uint32_t source_code) {
         RCC->CCIPR = (RCC->CCIPR & ~RCC_CCIPR_ADCSEL_Msk)
-                   | (static_cast<std::uint32_t>(source)
-                      << RCC_CCIPR_ADCSEL_Pos);
+                   | ((source_code << RCC_CCIPR_ADCSEL_Pos)
+                      & RCC_CCIPR_ADCSEL_Msk);
     }
 
 private:

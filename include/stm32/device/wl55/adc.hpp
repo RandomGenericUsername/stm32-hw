@@ -4,6 +4,7 @@
 
 #include <stm32wl55xx.h>
 
+#include "stm32/device/wl55/adc_clock.hpp"
 #include "stm32/device/wl55/clock.hpp"
 #include "stm32/hw/peripheral.hpp"
 
@@ -13,6 +14,7 @@ namespace stm32::device::wl55 {
 class Adc1 final {
 public:
     using ClockTraits = device::wl55::ClockTraits;
+    using AdcClockTraits = device::wl55::AdcClockTraits;
 
     static constexpr hw::Peripheral id = hw::Peripheral::Adc1;
     static ADC_TypeDef* regs() { return ADC; }
