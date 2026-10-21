@@ -6,7 +6,8 @@
 
 #include "stm32/hw/adc.hpp"
 #include "stm32/hw/clock/h7.hpp"
-#include "stm32/hw/delay.hpp"
+#include "stm32/hw/delay/systick.hpp"
+#include "stm32/hw/nvic/h7.hpp"
 #include "stm32/hw/peripheral.hpp"
 
 namespace stm32::hw {
@@ -14,10 +15,9 @@ namespace stm32::hw {
 // STM32H7 ADC (ISR/IER/CR/CFGR/CFGR2/SMPR1-2/SQR1-4/DR).
 //
 // Default kernel clock: per_ck (HSI 64 MHz) / 4 = 16 MHz, with the analog boost
-// configured for the 12.5..20 MHz band. The source is selected in RCC and the
-// divider in ADC_CCR.PRESC.
-template <class Desc>
-class H7Adc final : public Adc<H7Adc<Desc>> {
+// configured for the 12.5..20 MHz band. Delay and NVIC are injected policies.
+template <class Desc, class Delay = SysTickDelay, class Irq = H7Nvic>
+class H7Adc final : public Adc<H7Adc<Desc, Delay, Irq>> {
 public:
     enum class SampleTime : std::uint8_t {
         Cycles1_5 = 0,
@@ -35,6 +35,7 @@ public:
     H7Adc& operator=(const H7Adc&) = delete;
 
     static void init() {
+        Delay::init();
         H7Clock::template enable<Desc::id>();
         H7Clock::select_adc_clock(H7Clock::AdcSource::ClkP);
 
@@ -46,7 +47,7 @@ public:
 
         if ((adc->CR & ADC_CR_ADVREGEN) == 0u) {
             adc->CR |= ADC_CR_ADVREGEN;
-            delay_us(10); // regulator start-up
+            Delay::wait_us(10); // regulator start-up (hardware-mandated)
         }
 
         if ((adc->CR & ADC_CR_ADEN) != 0u) {
@@ -64,7 +65,6 @@ public:
         adc->ISR = ADC_ISR_ADRDY;
         adc->CR |= ADC_CR_ADEN;
         while ((adc->ISR & ADC_ISR_ADRDY) == 0u) {
-            // After calibration, ADEN may be reset if set too soon.
             if ((adc->CR & ADC_CR_ADEN) == 0u) {
                 adc->CR |= ADC_CR_ADEN;
             }
@@ -72,7 +72,9 @@ public:
     }
 
     static void disable() {
+        Irq::disable(irq());
         auto* adc = Desc::regs();
+        adc->IER &= ~ADC_IER_EOCIE;
         if ((adc->CR & ADC_CR_ADEN) != 0u) {
             adc->CR |= ADC_CR_ADDIS;
             while ((adc->CR & ADC_CR_ADEN) != 0u) {
@@ -93,8 +95,7 @@ public:
                   | (0x2u << ADC_CFGR_RES_Pos); // 12-bit
 
         constexpr std::uint32_t field = 3u;
-        const std::uint32_t code =
-            static_cast<std::uint32_t>(sample_time);
+        const std::uint32_t code = static_cast<std::uint32_t>(sample_time);
         if constexpr (Channel < 10) {
             constexpr std::uint32_t pos = ADC_SMPR1_SMP0_Pos + field * Channel;
             adc->SMPR1 = (adc->SMPR1 & ~(0x7u << pos)) | (code << pos);
@@ -109,16 +110,56 @@ public:
                      << ADC_SQR1_SQ1_Pos);
     }
 
+    static void start() {
+        auto* adc = Desc::regs();
+        adc->ISR = ADC_ISR_EOC; // clear stale EOC
+        adc->IER |= ADC_IER_EOCIE;
+        adc->CR |= ADC_CR_ADSTART;
+    }
+
+    static bool irq_pending() {
+        return (Desc::regs()->ISR & ADC_ISR_EOC) != 0u;
+    }
+
+    static std::uint16_t read_result() {
+        auto* adc = Desc::regs();
+        const std::uint16_t value =
+            static_cast<std::uint16_t>(adc->DR & 0x0FFFu);
+        adc->ISR = ADC_ISR_EOC; // write 1 to clear
+        return value;
+    }
+
+    static void enable_irq() {
+        Irq::clear_pending(irq());
+        Irq::enable(irq());
+    }
+
+    static void disable_irq() {
+        Irq::disable(irq());
+    }
+
+    static void set_irq_priority(std::uint32_t priority) {
+        Irq::set_priority(irq(), priority);
+    }
+
+    static constexpr IRQn_Type irq() {
+        return (Desc::id == Peripheral::Adc3) ? ADC3_IRQn : ADC_IRQn;
+    }
+
     template <std::uint8_t Channel>
     static std::uint16_t read() {
         static_assert(Channel < 20, "H7 ADC channel must be in 0..19");
 
         auto* adc = Desc::regs();
+        adc->IER &= ~ADC_IER_EOCIE;
         adc->ISR = ADC_ISR_EOC;
         adc->CR |= ADC_CR_ADSTART;
         while ((adc->ISR & ADC_ISR_EOC) == 0u) {
         }
-        return static_cast<std::uint16_t>(adc->DR & 0x0FFFu);
+        const std::uint16_t value =
+            static_cast<std::uint16_t>(adc->DR & 0x0FFFu);
+        adc->ISR = ADC_ISR_EOC;
+        return value;
     }
 };
 

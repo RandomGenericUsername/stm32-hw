@@ -70,15 +70,41 @@ public:
     static void init();          // gate + kernel clock + regulator + calibration
     static void disable();
 
-    template <std::uint8_t Channel>
-    static void configure(typename Impl::SampleTime sample_time);
+    template <std::uint8_t Channel, class SampleTime>
+    static void configure(SampleTime sample_time);
+
+    static void start();         // enable EOC IRQ + software trigger
+    static bool irq_pending();
+    static std::uint16_t read_result(); // clear EOC, return DR
+    static void enable_irq();
+    static void disable_irq();
+    static void set_irq_priority(std::uint32_t priority);
 
     template <std::uint8_t Channel>
-    static std::uint16_t read(); // software start, poll EOC, return DR
+    static std::uint16_t read(); // explicit blocking convenience
 };
 
 }
 ```
+
+Family classes take the delay and NVIC policies:
+
+```cpp
+template <class Desc, class Delay = SysTickDelay, class Irq = F4Nvic>
+class F4Adc;
+
+template <class Desc, class Delay = SysTickDelay, class Irq = H7Nvic>
+class H7Adc;
+
+template <class Desc, class Delay = SysTickDelay, class Irq = WlNvic>
+class WlAdc;
+```
+
+`Delay` supplies `init()` and `wait_us(uint32_t)`. `Irq` supplies
+`enable/disable/clear_pending/set_priority`. Both are compile-time policies, so
+an application can inject its own timer/tick or NVIC wrapper without changing
+the ADC driver. `SysTickDelay` is the reference implementation: a polled 1 MHz
+SysTick down-counter with the interrupt disabled.
 
 Family sample-time enums (the codes are the real 3-bit fields):
 
@@ -115,9 +141,41 @@ The ADC family implementation sets the divider that lives in the ADC block
 
 ## Usage (application side)
 
-```cpp
-using Adc1 = stm32::hw::WlAdc<stm32::device::wl55::Adc1>;
+Interrupt-driven path (primary):
 
+```cpp
+#include <stm32/drivers/adc_sampler.hpp>
+
+using Adc1 = stm32::hw::WlAdc<stm32::device::wl55::Adc1>;
+using Sampler = stm32::drivers::AdcSampler<Adc1>;
+
+static Sampler g_adc;
+
+void on_adc(Sampler* self, std::uint32_t context) {
+    const std::uint16_t raw = self->take();
+    (void)context;
+    // process raw
+}
+
+extern "C" void ADC_IRQHandler(void) {
+    g_adc.on_irq();
+}
+
+void app_adc_init() {
+    g_adc.init();
+    g_adc.set_irq_priority(5);
+    g_adc.on_complete<&on_adc>(&g_adc, 42u);
+    g_adc.start<0>(Adc1::SampleTime::Cycles12_5);
+}
+```
+
+The callback is registered with a variadic template: the function and its
+bound arguments are stored per `(Adc, Fn, Args...)`, then invoked from the ISR.
+The sampler owns `ready`/`value`; `take()` consumes the sample.
+
+Blocking convenience (init/selftest):
+
+```cpp
 Adc1::init();
 Adc1::configure<13>(Adc1::SampleTime::Cycles12_5); // VREFINT on WL55
 const std::uint16_t raw = Adc1::read<13>();
@@ -133,16 +191,26 @@ Pin::init({ hw::Mode::Analog, hw::OutputType::PushPull,
 
 The pin↔channel mapping is board knowledge and stays in the app.
 
+## Interrupt path
+
+`start()` enables `EOCIE` and the software trigger. The app owns the vector
+symbol (`ADC_IRQHandler`; `ADC3_IRQHandler` on H7 for ADC3) and calls
+`Sampler::on_irq()`, which clears EOC, stores the value, and runs the registered
+callback. `read()` disables `EOCIE` and polls as an explicit blocking path.
+
 ## First slice
 
 In scope:
 
-- one channel, one conversion, software trigger, polling;
+- one channel, one conversion, software trigger;
+- interrupt-driven completion (`EOC`) with variadic callback registration;
+- explicit blocking `read()` kept as a convenience;
 - fixed 12-bit right-aligned on all three (no resolution argument yet;
   H7 16/14-bit is deferred);
 - family `init()` includes regulator/calibration/ready;
+- delay and NVIC injected as policies (`SysTickDelay` is the reference);
 - three compile checks with the real CMSIS headers;
-- disassembly checks for gate/clock/init/start per family.
+- disassembly checks for gate/clock/init/start/EOCIE/NVIC per family.
 
 Out of scope:
 

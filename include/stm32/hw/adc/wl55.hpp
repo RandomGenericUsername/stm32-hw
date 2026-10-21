@@ -6,7 +6,8 @@
 
 #include "stm32/hw/adc.hpp"
 #include "stm32/hw/clock/wl55.hpp"
-#include "stm32/hw/delay.hpp"
+#include "stm32/hw/delay/systick.hpp"
+#include "stm32/hw/nvic/wl55.hpp"
 #include "stm32/hw/peripheral.hpp"
 
 namespace stm32::hw {
@@ -14,10 +15,9 @@ namespace stm32::hw {
 // STM32WL55 ADC (L4-style: ISR/IER/CR/CFGR1/CFGR2/SMPR/CHSELR/DR).
 //
 // Default kernel clock: HSI16, asynchronous mode, no prescaler (16 MHz).
-// The ADC has one SMPR with two shared sample-time fields (SMP1/SMP2) and a
-// per-channel SMPSEL bit; this slice routes every channel to SMP1.
-template <class Desc>
-class WlAdc final : public Adc<WlAdc<Desc>> {
+// Delay and NVIC are injected policies.
+template <class Desc, class Delay = SysTickDelay, class Irq = WlNvic>
+class WlAdc final : public Adc<WlAdc<Desc, Delay, Irq>> {
 public:
     enum class SampleTime : std::uint8_t {
         Cycles1_5 = 0,
@@ -35,6 +35,7 @@ public:
     WlAdc& operator=(const WlAdc&) = delete;
 
     static void init() {
+        Delay::init();
         WlClock::template enable<Desc::id>();
         WlClock::select_adc_clock(WlClock::AdcSource::Hsi16);
 
@@ -46,7 +47,7 @@ public:
 
         if ((adc->CR & ADC_CR_ADVREGEN) == 0u) {
             adc->CR |= ADC_CR_ADVREGEN;
-            delay_us(20); // regulator start-up
+            Delay::wait_us(20); // regulator start-up (hardware-mandated)
         }
 
         if ((adc->CR & ADC_CR_ADEN) != 0u) {
@@ -60,7 +61,6 @@ public:
         adc->ISR = ADC_ISR_ADRDY;
         adc->CR |= ADC_CR_ADEN;
         while ((adc->ISR & ADC_ISR_ADRDY) == 0u) {
-            // After calibration, ADEN may be reset if set too soon.
             if ((adc->CR & ADC_CR_ADEN) == 0u) {
                 adc->CR |= ADC_CR_ADEN;
             }
@@ -68,7 +68,9 @@ public:
     }
 
     static void disable() {
+        Irq::disable(irq());
         auto* adc = Desc::regs();
+        adc->IER &= ~ADC_IER_EOCIE;
         if ((adc->CR & ADC_CR_ADEN) != 0u) {
             adc->CR |= ADC_CR_ADDIS;
             while ((adc->CR & ADC_CR_ADEN) != 0u) {
@@ -86,8 +88,7 @@ public:
         adc->CFGR1 &= ~(ADC_CFGR1_RES_Msk | ADC_CFGR1_CONT | ADC_CFGR1_EXTEN
                         | ADC_CFGR1_ALIGN | ADC_CFGR1_CHSELRMOD);
 
-        const std::uint32_t code =
-            static_cast<std::uint32_t>(sample_time);
+        const std::uint32_t code = static_cast<std::uint32_t>(sample_time);
         adc->SMPR = (adc->SMPR & ~ADC_SMPR_SMP1_Msk)
                   | (code << ADC_SMPR_SMP1_Pos);
 
@@ -101,16 +102,56 @@ public:
         }
     }
 
+    static void start() {
+        auto* adc = Desc::regs();
+        adc->ISR = ADC_ISR_EOC; // clear stale EOC
+        adc->IER |= ADC_IER_EOCIE;
+        adc->CR |= ADC_CR_ADSTART;
+    }
+
+    static bool irq_pending() {
+        return (Desc::regs()->ISR & ADC_ISR_EOC) != 0u;
+    }
+
+    static std::uint16_t read_result() {
+        auto* adc = Desc::regs();
+        const std::uint16_t value =
+            static_cast<std::uint16_t>(adc->DR & 0x0FFFu);
+        adc->ISR = ADC_ISR_EOC; // write 1 to clear
+        return value;
+    }
+
+    static void enable_irq() {
+        Irq::clear_pending(irq());
+        Irq::enable(irq());
+    }
+
+    static void disable_irq() {
+        Irq::disable(irq());
+    }
+
+    static void set_irq_priority(std::uint32_t priority) {
+        Irq::set_priority(irq(), priority);
+    }
+
+    static constexpr IRQn_Type irq() {
+        return ADC_IRQn;
+    }
+
     template <std::uint8_t Channel>
     static std::uint16_t read() {
         static_assert(Channel < 18, "WL55 ADC channel must be in 0..17");
 
         auto* adc = Desc::regs();
+        adc->IER &= ~ADC_IER_EOCIE;
         adc->ISR = ADC_ISR_EOC;
         adc->CR |= ADC_CR_ADSTART;
         while ((adc->ISR & ADC_ISR_EOC) == 0u) {
         }
-        return static_cast<std::uint16_t>(adc->DR & 0x0FFFu);
+        const std::uint16_t value =
+            static_cast<std::uint16_t>(adc->DR & 0x0FFFu);
+        adc->ISR = ADC_ISR_EOC;
+        return value;
     }
 };
 

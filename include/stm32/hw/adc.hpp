@@ -4,7 +4,7 @@
 
 namespace stm32::hw {
 
-// Generic single-conversion ADC facade.
+// Generic ADC facade.
 //
 // Impl supplies:
 //   using SampleTime = ...;                 // family-specific 3-bit codes
@@ -12,12 +12,18 @@ namespace stm32::hw {
 //   static void disable();
 //   template <std::uint8_t Channel>
 //   static void configure(SampleTime);
+//   static void start();                    // enable EOC IRQ + SW trigger
+//   static bool irq_pending();
+//   static std::uint16_t read_result();     // clear EOC, return DR
+//   static void enable_irq();
+//   static void disable_irq();
+//   static void set_irq_priority(std::uint32_t);
 //   template <std::uint8_t Channel>
-//   static std::uint16_t read();            // software start, poll, DR
+//   static std::uint16_t read();            // blocking convenience
 //
-// This first slice is 12-bit, right-aligned, single conversion, polling.
-// Resolution, DMA, interrupts, scan/continuous, injected channels, watchdogs,
-// oversampling and multimode are deliberately out of scope.
+// The interrupt path is the primary one: configure + start, then
+// handle the IRQ in the application and call read_result(). read() is kept as
+// an explicit blocking convenience for init/selftest.
 template <class Impl>
 class Adc {
 public:
@@ -36,6 +42,30 @@ public:
     template <std::uint8_t Channel, class SampleTime>
     static void configure(SampleTime sample_time) {
         Impl::template configure<Channel>(sample_time);
+    }
+
+    static void start() {
+        Impl::start();
+    }
+
+    static bool irq_pending() {
+        return Impl::irq_pending();
+    }
+
+    static std::uint16_t read_result() {
+        return Impl::read_result();
+    }
+
+    static void enable_irq() {
+        Impl::enable_irq();
+    }
+
+    static void disable_irq() {
+        Impl::disable_irq();
+    }
+
+    static void set_irq_priority(std::uint32_t priority) {
+        Impl::set_irq_priority(priority);
     }
 
     template <std::uint8_t Channel>
