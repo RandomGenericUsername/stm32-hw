@@ -192,6 +192,26 @@ The driver owns:
 
 The application never defines `ADC_IRQHandler`.
 
+## WL55 VREFINT calibration
+
+The internal reference is sampled on ADC VIN[13]. Converting that raw sample
+to a calibrated voltage uses the factory count in system memory:
+
+```text
+VREF+ = VREF+_Charac × VREFINT_CAL / VREFINT_DATA     (RM0453 §18.9)
+```
+
+- `device::wl55::Adc1::vrefint_cal_address` = `0x1FFF75AA` (16-bit,
+  DS13293 §3.20.2 Table 14: acquired at VDDA = VREF+ = 3.3 V ±10 mV, 30 °C).
+- `device::wl55::Adc1::vrefplus_charac_mv` = `3300`.
+- `hw::WlAdc<...>::vrefint_cal()` reads the count (stateless memory access).
+- `drivers::wl55::Adc1::vrefplus_millivolts(raw)` applies the formula with
+  rounding; `vrefplus_millivolts(cal, raw)` is the pure, compile-time-checked
+  form.
+
+This returns the calibrated **VREF+ (analog supply/reference)** in millivolts,
+not the ~1.2 V bandgap voltage itself.
+
 ## Library-owned ISR
 
 Each family has a compiled driver source:
@@ -236,7 +256,8 @@ for (;;) {
     }
 
     const std::uint16_t value = Adc1::take();
-    (void)value;
+    const std::uint32_t vrefplus_mv = Adc1::vrefplus_millivolts(value);
+    (void)vrefplus_mv;
     // delay
 }
 ```

@@ -135,6 +135,8 @@ First vertical slice:
   `device::f4::Adc1`, `device::h7::Adc1/2/3`, `device::wl55::Adc1`;
   stateful `drivers::AdcDriver` + family aliases, library-owned ISR/router,
   optional callback, injected `Delay`/`Irq` policies
+- WL55 VREFINT factory calibration (system memory) and calibrated
+  `VREF+` conversion in millivolts (`drivers::wl55::Adc1`)
 - Compile check: `tests/compile_check.cpp`
 - ADC compile checks: `tests/adc_compile_f4.cpp`, `adc_compile_h7.cpp`,
   `adc_compile_wl55.cpp`, plus the three `src/drivers/adc_irq_*.cpp` sources

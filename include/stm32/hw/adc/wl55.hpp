@@ -139,6 +139,15 @@ public:
         Desc::common()->CCR |= ADC_CCR_VREFEN;
     }
 
+    // Factory VREFINT calibration count from system memory (read-only).
+    static std::uint16_t vrefint_cal() {
+        return *reinterpret_cast<const volatile std::uint16_t*>(
+            Desc::vrefint_cal_address);
+    }
+
+    // VREF+ characterized during the VREFINT calibration (millivolts).
+    static constexpr std::uint32_t vrefplus_charac_mv = Desc::vrefplus_charac_mv;
+
     static constexpr IRQn_Type irq() {
         return ADC_IRQn;
     }
