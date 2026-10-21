@@ -141,21 +141,24 @@ The ADC family implementation sets the divider that lives in the ADC block
 
 ## Usage (application side)
 
-Interrupt-driven path (primary):
+Interrupt-driven path (primary). The callback type and its argument types are
+part of the sampler type; the callback object and argument values are passed to
+the constructor:
 
 ```cpp
 #include <stm32/drivers/adc_sampler.hpp>
 
 using Adc1 = stm32::hw::WlAdc<stm32::device::wl55::Adc1>;
-using Sampler = stm32::drivers::AdcSampler<Adc1>;
 
-static Sampler g_adc;
-
-void on_adc(Sampler* self, std::uint32_t context) {
-    const std::uint16_t raw = self->take();
-    (void)context;
+void on_adc(std::uint16_t raw, std::uint32_t context) {
     // process raw
+    (void)context;
 }
+
+using Sampler =
+    stm32::drivers::AdcSampler<Adc1, decltype(&on_adc), std::uint32_t>;
+
+static Sampler g_adc(&on_adc, 42u);
 
 extern "C" void ADC_IRQHandler(void) {
     g_adc.on_irq();
@@ -164,14 +167,13 @@ extern "C" void ADC_IRQHandler(void) {
 void app_adc_init() {
     g_adc.init();
     g_adc.set_irq_priority(5);
-    g_adc.on_complete<&on_adc>(&g_adc, 42u);
     g_adc.start<0>(Adc1::SampleTime::Cycles12_5);
 }
 ```
 
-The callback is registered with a variadic template: the function and its
-bound arguments are stored per `(Adc, Fn, Args...)`, then invoked from the ISR.
-The sampler owns `ready`/`value`; `take()` consumes the sample.
+There is no registration step and no static callback tuple. The signature is
+`void(std::uint16_t value, Args...)`; the sampler owns `ready`/`value`, and
+`take()` consumes the sample if the main loop also wants it.
 
 Blocking convenience (init/selftest):
 
@@ -203,7 +205,8 @@ callback. `read()` disables `EOCIE` and polls as an explicit blocking path.
 In scope:
 
 - one channel, one conversion, software trigger;
-- interrupt-driven completion (`EOC`) with variadic callback registration;
+- interrupt-driven completion (`EOC`) with a constructor-injected callback
+  (value + variadic bound arguments);
 - explicit blocking `read()` kept as a convenience;
 - fixed 12-bit right-aligned on all three (no resolution argument yet;
   H7 16/14-bit is deferred);

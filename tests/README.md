@@ -15,8 +15,8 @@ The consuming project (`wl55jc`) builds it as `make hw-check` for M4 and M0+.
 - `adc_compile_wl55.cpp` — STM32WL55JC, `-mcpu=cortex-m4 -DSTM32WL55xx`
 
 Each test instantiates the ADC, the `AdcSampler` driver, the default
-`SysTickDelay`/family-NVIC policies, and a completion callback with bound
-arguments. The vector symbol (`ADC_IRQHandler` / `ADC3_IRQHandler`) remains
+`SysTickDelay`/family-NVIC policies, and a constructor-injected completion
+callback with bound arguments. The vector symbol (`ADC_IRQHandler` / `ADC3_IRQHandler`) remains
 application code; it is not defined in these compile checks.
 
 Note the delay/IRQ policies are template parameters:

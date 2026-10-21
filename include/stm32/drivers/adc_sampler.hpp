@@ -5,45 +5,27 @@
 
 namespace stm32::drivers {
 
-namespace detail {
-
-// Binds a callable and its arguments for an interrupt callback.
+// Stateful ADC sampler: the callback is part of the type and is injected at
+// construction. No static callback state, no registration step.
 //
-// The tuple is static per (Adc, Fn, Args...). One sampler instance per ADC type
-// is the intended model (the peripheral itself is a singleton), so a single
-// registration per ADC is sufficient.
-template <class Adc, auto Fn, class... Args>
-class AdcCallback {
-public:
-    static void set(Args... args) {
-        args_ = std::tuple<Args...>(args...);
-    }
-
-    static void invoke() {
-        std::apply(Fn, args_);
-    }
-
-private:
-    static inline std::tuple<Args...> args_{};
-};
-
-} // namespace detail
-
-// Stateful ADC sampler: owns readiness/value and the completion callback.
+// Callback signature:
+//   void(std::uint16_t value, Args...)
+//
+// Usage:
+//   void on_adc(std::uint16_t value, Context* ctx) { ... }
+//   using Sampler = AdcSampler<Adc1, decltype(&on_adc), Context*>;
+//   static Sampler g_adc(&on_adc, &ctx);
 //
 // The application still owns the ISR symbol:
-//
-//   static AdcSampler<Adc1> g_adc;
 //   extern "C" void ADC_IRQHandler(void) { g_adc.on_irq(); }
-//
-// Callback arguments are bound at registration time; the new sample is taken
-// from the sampler (take()) inside the callback or later from the main loop.
-template <class Adc>
+template <class Adc, class Callback, class... Args>
 class AdcSampler {
 public:
     using SampleTime = typename Adc::SampleTime;
 
-    AdcSampler() = default;
+    constexpr AdcSampler(Callback callback, Args... args)
+        : callback_(callback), args_(args...) {}
+
     AdcSampler(const AdcSampler&) = delete;
     AdcSampler& operator=(const AdcSampler&) = delete;
 
@@ -67,9 +49,7 @@ public:
         }
         value_ = Adc::read_result();
         ready_ = true;
-        if (callback_ != nullptr) {
-            callback_();
-        }
+        invoke();
         return true;
     }
 
@@ -91,16 +71,15 @@ public:
         Adc::set_irq_priority(priority);
     }
 
-    template <auto Fn, class... Args>
-    void on_complete(Args... args) {
-        detail::AdcCallback<Adc, Fn, Args...>::set(args...);
-        callback_ = &detail::AdcCallback<Adc, Fn, Args...>::invoke;
+private:
+    void invoke() {
+        std::apply(
+            [this](auto&... args) { callback_(value_, args...); },
+            args_);
     }
 
-private:
-    using Callback = void (*)();
-
-    Callback callback_ = nullptr;
+    Callback callback_;
+    std::tuple<Args...> args_;
     volatile bool ready_ = false;
     volatile std::uint16_t value_ = 0;
 };
