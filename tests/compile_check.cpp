@@ -3,6 +3,7 @@
 // This translation unit is meant to be compiled with the consuming project's
 // CMSIS include paths. It does not need to link.
 
+#include "stm32/device/wl55/button.hpp"
 #include "stm32/device/wl55/gpio.hpp"
 #include "stm32/drivers/led.hpp"
 
@@ -29,4 +30,11 @@ void compile_check() {
     led.off();
     led.toggle();
     (void)led.is_on();
+
+#if defined(__ARM_ARCH_7EM__)
+    // EXTI/NVIC slice is CPU1 (M4) only for now.
+    stm32::device::wl55::ButtonSw1::init();
+    stm32::device::wl55::ButtonSw1::clear_pending();
+    (void)stm32::device::wl55::ButtonSw1::is_pressed();
+#endif
 }

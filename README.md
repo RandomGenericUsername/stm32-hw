@@ -83,4 +83,7 @@ First vertical slice:
 - GPIO: `ModernLayout`, `Port`, `Pin`
 - Device: `GpioA`, `GpioB`, `GpioC`, `GpioH`
 - Driver: stateful `Led`
+- Interrupts: `hw::Exti` / `hw::Nvic`, WL55 `WlExti` / `WlNvic`,
+  `device::wl55::ButtonSw1` (PA0, EXTI0, falling edge)
 - Compile check: `tests/compile_check.cpp`
+- Design notes: `docs/design/interrupts.md`
