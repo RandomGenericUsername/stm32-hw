@@ -1,30 +1,30 @@
 #pragma once
 
 #include <cstdint>
-#include <tuple>
 
 namespace stm32::drivers {
 
-// Stateful ADC sampler: the callback is part of the type and is injected at
-// construction. No static callback state, no registration step.
+// Stateful ADC sampler. The callback is part of the sampler type and is
+// injected at construction; its state lives in the callback object.
 //
-// Callback signature:
-//   void(std::uint16_t value, Args...)
+// Callback contract:
+//   void operator()(std::uint16_t value) const
 //
 // Usage:
-//   void on_adc(std::uint16_t value, Context* ctx) { ... }
-//   using Sampler = AdcSampler<Adc1, decltype(&on_adc), Context*>;
-//   static Sampler g_adc(&on_adc, &ctx);
+//   struct OnAdc { State& state;
+//                  void operator()(std::uint16_t v) const { ... } };
+//   using Sampler = AdcSampler<Adc1, OnAdc>;
+//   static Sampler g_adc(OnAdc{g_state});
 //
 // The application still owns the ISR symbol:
 //   extern "C" void ADC_IRQHandler(void) { g_adc.on_irq(); }
-template <class Adc, class Callback, class... Args>
+template <class Adc, class Callback>
 class AdcSampler {
 public:
     using SampleTime = typename Adc::SampleTime;
 
-    constexpr AdcSampler(Callback callback, Args... args)
-        : callback_(callback), args_(args...) {}
+    constexpr explicit AdcSampler(Callback callback)
+        : callback_(callback) {}
 
     AdcSampler(const AdcSampler&) = delete;
     AdcSampler& operator=(const AdcSampler&) = delete;
@@ -49,7 +49,7 @@ public:
         }
         value_ = Adc::read_result();
         ready_ = true;
-        invoke();
+        callback_(value_);
         return true;
     }
 
@@ -72,14 +72,7 @@ public:
     }
 
 private:
-    void invoke() {
-        std::apply(
-            [this](auto&... args) { callback_(value_, args...); },
-            args_);
-    }
-
     Callback callback_;
-    std::tuple<Args...> args_;
     volatile bool ready_ = false;
     volatile std::uint16_t value_ = 0;
 };

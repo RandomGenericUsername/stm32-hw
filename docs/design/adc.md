@@ -141,39 +141,44 @@ The ADC family implementation sets the divider that lives in the ADC block
 
 ## Usage (application side)
 
-Interrupt-driven path (primary). The callback type and its argument types are
-part of the sampler type; the callback object and argument values are passed to
-the constructor:
+Interrupt-driven path (primary). The callback is a stateful functor; its type
+is part of the sampler type and the functor is passed at construction:
 
 ```cpp
 #include <stm32/drivers/adc_sampler.hpp>
 
 using Adc1 = stm32::hw::WlAdc<stm32::device::wl55::Adc1>;
 
-void on_adc(std::uint16_t raw, std::uint32_t context) {
-    // process raw
-    (void)context;
-}
+struct AdcState {
+    std::uint16_t value = 0;
+    bool busy = false;
+};
+
+template <class State>
+struct OnAdcComplete {
+    State& state;
+
+    void operator()(std::uint16_t value) const {
+        state.value = value;
+        state.busy = false;
+    }
+};
 
 using Sampler =
-    stm32::drivers::AdcSampler<Adc1, decltype(&on_adc), std::uint32_t>;
+    stm32::drivers::AdcSampler<Adc1, OnAdcComplete<AdcState>>;
 
-static Sampler g_adc(&on_adc, 42u);
+static AdcState g_state;
+static Sampler g_adc(OnAdcComplete<AdcState>{g_state});
 
 extern "C" void ADC_IRQHandler(void) {
     g_adc.on_irq();
 }
-
-void app_adc_init() {
-    g_adc.init();
-    g_adc.set_irq_priority(5);
-    g_adc.start<0>(Adc1::SampleTime::Cycles12_5);
-}
 ```
 
-There is no registration step and no static callback tuple. The signature is
-`void(std::uint16_t value, Args...)`; the sampler owns `ready`/`value`, and
-`take()` consumes the sample if the main loop also wants it.
+There is no registration step, no static callback tuple, and no `decltype`.
+The callback contract is `void(std::uint16_t value)`; context is held by the
+functor's members. The sampler owns `ready`/`value`, and `take()` consumes the
+sample if the main loop also wants it.
 
 Blocking convenience (init/selftest):
 
@@ -197,7 +202,7 @@ The pin↔channel mapping is board knowledge and stays in the app.
 
 `start()` enables `EOCIE` and the software trigger. The app owns the vector
 symbol (`ADC_IRQHandler`; `ADC3_IRQHandler` on H7 for ADC3) and calls
-`Sampler::on_irq()`, which clears EOC, stores the value, and runs the registered
+`Sampler::on_irq()`, which clears EOC, stores the value, and runs the functor
 callback. `read()` disables `EOCIE` and polls as an explicit blocking path.
 
 ## First slice
@@ -205,8 +210,8 @@ callback. `read()` disables `EOCIE` and polls as an explicit blocking path.
 In scope:
 
 - one channel, one conversion, software trigger;
-- interrupt-driven completion (`EOC`) with a constructor-injected callback
-  (value + variadic bound arguments);
+- interrupt-driven completion (`EOC`) with a stateful functor callback
+  (context lives in the callback object);
 - explicit blocking `read()` kept as a convenience;
 - fixed 12-bit right-aligned on all three (no resolution argument yet;
   H7 16/14-bit is deferred);

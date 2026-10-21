@@ -130,7 +130,7 @@ First vertical slice:
 - ADC: `hw::Adc`, `F4Adc` / `H7Adc` / `WlAdc`; device descriptors
   `device::f4::Adc1`, `device::h7::Adc1/2/3`, `device::wl55::Adc1`;
   interrupt-driven single conversion with `drivers::AdcSampler`,
-  constructor-injected completion callbacks, injected `Delay`/`Irq` policies
+  stateful functor callbacks, injected `Delay`/`Irq` policies
 - Compile check: `tests/compile_check.cpp`
 - ADC compile checks: `tests/adc_compile_f4.cpp`, `adc_compile_h7.cpp`,
   `adc_compile_wl55.cpp`

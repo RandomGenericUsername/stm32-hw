@@ -1,5 +1,5 @@
 // Compile check for the F4 ADC family path (NUCLEO-F411RE reference), EOC IRQ
-// + constructor-injected completion callback.
+// + stateful functor callback.
 // Compile with -mcpu=cortex-m4 -DSTM32F411xE and the F4 CMSIS includes.
 
 #include <cstdint>
@@ -10,17 +10,29 @@
 
 using Adc1 = stm32::hw::F4Adc<stm32::device::f4::Adc1>;
 
-void on_adc_f4(std::uint16_t value) {
-    (void)value;
-}
+struct F4State {
+    std::uint16_t value = 0;
+};
 
-using Sampler = stm32::drivers::AdcSampler<Adc1, decltype(&on_adc_f4)>;
+template <class State>
+struct F4Callback {
+    State& state;
+
+    void operator()(std::uint16_t value) const {
+        state.value = value;
+    }
+};
+
+using Callback = F4Callback<F4State>;
+using Sampler = stm32::drivers::AdcSampler<Adc1, Callback>;
+
+static F4State g_state;
+static Sampler g_sampler(Callback{g_state});
 
 extern "C" std::uint16_t adc_f4_check() {
-    static Sampler sampler(&on_adc_f4);
-    sampler.init();
-    sampler.set_irq_priority(15);
-    sampler.start<0>(Adc1::SampleTime::Cycles56);
-    (void)sampler.on_irq();
-    return sampler.ready() ? sampler.take() : 0u;
+    g_sampler.init();
+    g_sampler.set_irq_priority(15);
+    g_sampler.start<0>(Adc1::SampleTime::Cycles56);
+    (void)g_sampler.on_irq();
+    return g_state.value;
 }
