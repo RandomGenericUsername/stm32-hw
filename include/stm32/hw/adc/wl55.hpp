@@ -4,7 +4,9 @@
 
 #include <stm32wl55xx.h>
 
+#include "stm32/device/wl55/clock.hpp"
 #include "stm32/hw/adc.hpp"
+#include "stm32/hw/adc/clock.hpp"
 #include "stm32/hw/clock/wl55.hpp"
 #include "stm32/hw/delay/systick.hpp"
 #include "stm32/hw/nvic/wl55.hpp"
@@ -12,13 +14,26 @@
 
 namespace stm32::hw {
 
+// Default WL55 ADC clock: HSI16 asynchronous, PRESC /1 = 16 MHz.
+struct WlAdcClockDefault {
+    static constexpr AdcClockConfig<device::wl55::ClockTraits> config = {
+        device::wl55::ClockTraits::AdcSource::Hsi16,
+        device::wl55::ClockTraits::AdcClockMode::Asynchronous,
+        device::wl55::ClockTraits::AdcPrescaler::Div1,
+    };
+};
+
 // STM32WL55 ADC (L4-style: ISR/IER/CR/CFGR1/CFGR2/SMPR/CHSELR/DR).
 //
 // Default kernel clock: HSI16, asynchronous mode, no prescaler (16 MHz).
 // Delay and NVIC are injected policies.
-template <class Desc, class Delay = SysTickDelay, class Irq = WlNvic>
-class WlAdc final : public Adc<WlAdc<Desc, Delay, Irq>> {
+template <class Desc, class Delay = SysTickDelay, class Irq = WlNvic,
+          class ClockPolicy = WlAdcClockDefault>
+class WlAdc final : public Adc<WlAdc<Desc, Delay, Irq, ClockPolicy>> {
 public:
+    using Clock = WlClock<typename Desc::ClockTraits>;
+    static constexpr auto adc_clock = ClockPolicy::config;
+
     enum class SampleTime : std::uint8_t {
         Cycles1_5 = 0,
         Cycles3_5 = 1,
@@ -30,24 +45,25 @@ public:
         Cycles160_5 = 7,
     };
 
-    // Default ADC kernel clock: HSI16, asynchronous mode (CKMODE = 00),
-    // ADC_CCR.PRESC = /1. init() programs exactly this configuration.
-    static constexpr std::uint32_t clock_hz = 16000000u;
-
     WlAdc() = delete;
     WlAdc(const WlAdc&) = delete;
     WlAdc& operator=(const WlAdc&) = delete;
 
     static void init() {
         Delay::init();
-        WlClock::template enable<Desc::id>();
-        WlClock::select_adc_clock(WlClock::AdcSource::Hsi16);
+        Clock::template enable<Desc::id>();
+        Clock::select_adc_clock(adc_clock.source);
 
         auto* adc = Desc::regs();
 
-        // Asynchronous kernel clock, no prescaler (HSI16 = 16 MHz).
-        adc->CFGR2 &= ~ADC_CFGR2_CKMODE;
-        Desc::common()->CCR &= ~ADC_CCR_PRESC;
+        // ADC-local clock mode and asynchronous prescaler.
+        adc->CFGR2 = (adc->CFGR2 & ~ADC_CFGR2_CKMODE_Msk)
+                   | (static_cast<std::uint32_t>(adc_clock.mode)
+                      << ADC_CFGR2_CKMODE_Pos);
+        Desc::common()->CCR =
+            (Desc::common()->CCR & ~ADC_CCR_PRESC_Msk)
+            | (static_cast<std::uint32_t>(adc_clock.prescaler)
+               << ADC_CCR_PRESC_Pos);
 
         if ((adc->CR & ADC_CR_ADVREGEN) == 0u) {
             adc->CR |= ADC_CR_ADVREGEN;

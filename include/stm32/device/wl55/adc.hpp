@@ -4,6 +4,7 @@
 
 #include <stm32wl55xx.h>
 
+#include "stm32/device/wl55/clock.hpp"
 #include "stm32/hw/peripheral.hpp"
 
 namespace stm32::device::wl55 {
@@ -11,6 +12,8 @@ namespace stm32::device::wl55 {
 // MCU fact only: register block pointers, peripheral identity, calibration.
 class Adc1 final {
 public:
+    using ClockTraits = device::wl55::ClockTraits;
+
     static constexpr hw::Peripheral id = hw::Peripheral::Adc1;
     static ADC_TypeDef* regs() { return ADC; }
     static ADC_Common_TypeDef* common() { return ADC_COMMON; }

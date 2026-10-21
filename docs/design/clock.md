@@ -1,6 +1,6 @@
 # Clock tree — cross-family design
 
-Status: design proposal (not implemented)
+Status: WL55 system/ADC clock config implemented; F4/H7 traits not yet
 Date: 2026-10-21
 Targets: NUCLEO-WL55JC (STM32WL55JC), NUCLEO-F411RE (STM32F411RE),
 NUCLEO-H755ZI-Q (STM32H755ZI), and other STM32 boards
@@ -140,6 +140,7 @@ struct ClockTraits {
 
     static constexpr std::uint32_t hsi16_hz = 16'000'000;
     static constexpr std::uint32_t hse_nominal_hz = 32'000'000;
+    static constexpr bool hse_tcxo = false; // board may override
 
     static constexpr std::uint32_t max_sysclk_hz = 48'000'000;
     static constexpr std::uint32_t max_hclk_hz = 48'000'000;
@@ -171,6 +172,7 @@ namespace board::nucleo_wl55jc {
 
 struct Clock : device::wl55::ClockTraits {
     static constexpr std::uint32_t hse_hz = 32'000'000; // X4 TCXO default
+    static constexpr bool hse_tcxo = true;              // set HSEBYPPWR
     static constexpr std::uint32_t lse_hz = 32'768;
 };
 
@@ -453,6 +455,38 @@ Target after the refactor:
 - same frequencies, expressed as a `BasicSystemClockConfig<BoardClock>`
 - ADC clock expressed as an `AdcClockConfig<BoardClock>` policy
 - no `use_*` functions in `hw`
+
+## Implementation status
+
+Implemented for WL55:
+
+- `device::wl55::ClockTraits`
+- `board::nucleo_wl55jc::Clock`
+- `BasicSystemClockConfig<Traits>`
+- `WlClock<Traits>::configure(config)`
+- constexpr WL55 configs: `msi_4mhz`, `hsi16_16mhz`, `hse32_32mhz`, `pll_48mhz`
+- `AdcClockConfig<Traits>` and `WlAdc` clock policy
+- compile-time validation via `static_assert`
+
+Live-validated on NUCLEO-WL55JC:
+
+| Config | SYSCLK | Flash WS | Evidence |
+|---|---:|---:|---|
+| HSI16 | 16 MHz | 0 | `RCC_CFGR = 0x00070005`, `SystemCoreClock = 16 MHz` |
+| HSE32 TCXO | 32 MHz | 1 | `RCC_CR` HSEON/HSERDY/HSEBYPPWR, `RCC_CFGR = 0x0007000a`, `SystemCoreClock = 32 MHz` |
+| PLL from HSI16 | 48 MHz | 2 | `RCC_CFGR = 0x0007000f`, `PLLCFGR = 0x770b0c02`, `SystemCoreClock = 48 MHz` |
+
+HSE32 note: the NUCLEO-WL55JC default is the X4 TCXO. `HSEBYPPWR` must be
+set to power the TCXO regulator before waiting for `HSERDY`; this is a board
+fact (`hse_tcxo = true`), not a device fact.
+
+Not implemented yet:
+
+- F4/H7 `ClockTraits` and family config implementations
+- H7 D1/D2/D3 domain config
+- runtime clock switching / DVFS
+- MCO/LSCO configuration
+- peripheral kernel muxes for UART/I2C/SPI/LPTIM
 
 ## Migration plan
 

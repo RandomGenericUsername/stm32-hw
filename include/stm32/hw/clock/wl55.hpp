@@ -5,6 +5,7 @@
 
 #include <stm32wl55xx.h>
 
+#include "stm32/hw/clock/config.hpp"
 #include "stm32/hw/peripheral.hpp"
 #include "stm32/hw/peripheral_clock.hpp"
 #include "stm32/hw/rcc_gate.hpp"
@@ -72,15 +73,17 @@ class WlGate<Peripheral::Adc1>
           offsetof(RCC_TypeDef, APB2RSTR),
           RCC_APB2RSTR_ADCRST_Pos> {};
 
-// WL55 clock implementation (type-level singleton).
-class WlClock final : public PeripheralClock<WlClock> {
+// WL55 RCC implementation, parameterized by a board/device clock traits type.
+template <class Traits>
+class WlClock final : public PeripheralClock<WlClock<Traits>> {
 public:
-    enum class AdcSource : std::uint32_t {
-        None = 0,
-        Hsi16 = 1,
-        PllP = 2,
-        Sysclk = 3,
-    };
+    using Config = BasicSystemClockConfig<Traits>;
+    using Source = typename Traits::Source;
+    using SourceKind = typename Source::Kind;
+    using MsiRange = typename Traits::MsiRange;
+    using AdcSource = typename Traits::AdcSource;
+    using PllConfig = typename Traits::PllConfig;
+    using PllInput = typename PllConfig::Input;
 
     // RCC_CFGR.SW / SWS encodings (RM0453 §7.4.3).
     enum class SysclkSource : std::uint32_t {
@@ -89,31 +92,6 @@ public:
         Hse32 = 2,
         Pll = 3,
     };
-
-    // RCC_CFGR.HPRE encodings.
-    enum class AhbDivider : std::uint32_t {
-        Div1 = 0,
-        Div2 = 8,
-        Div4 = 9,
-        Div8 = 10,
-        Div16 = 11,
-        Div64 = 12,
-        Div128 = 13,
-        Div256 = 14,
-        Div512 = 15,
-    };
-
-    // RCC_CFGR.PPRE1/PPRE2 encodings.
-    enum class ApbDivider : std::uint32_t {
-        Div1 = 0,
-        Div2 = 4,
-        Div4 = 5,
-        Div8 = 6,
-        Div16 = 7,
-    };
-
-    static constexpr std::uint32_t hsi16_hz = 16000000u;
-    static constexpr std::uint32_t msi_reset_hz = 4000000u;
 
     WlClock() = delete;
     WlClock(const WlClock&) = delete;
@@ -139,10 +117,162 @@ public:
         return WlGate<P>::is_enabled();
     }
 
+    // Apply a declarative system clock tree. Intended for reset-time
+    // configuration; callers must static_assert(config.valid()).
+    static void configure(const Config& config) {
+        ensure_voltage_range1();
+
+        const std::uint32_t new_hclk = config.hclk_hz();
+        const std::uint32_t old_hclk = SystemCoreClock;
+
+        if (new_hclk > old_hclk) {
+            set_flash_latency(config.flash_wait_states());
+        }
+
+        prepare_source(config.source);
+
+        set_ahb_divider(config.ahb);
+        set_apb1_divider(config.apb1);
+        set_apb2_divider(config.apb2);
+
+        select_sysclk(sysclk_source(config.source.kind));
+
+        if (new_hclk <= old_hclk) {
+            set_flash_latency(config.flash_wait_states());
+        }
+
+        SystemCoreClockUpdate();
+    }
+
     static void enable_hsi16() {
         RCC->CR |= RCC_CR_HSION;
         while ((RCC->CR & RCC_CR_HSIRDY) == 0u) {
         }
+    }
+
+    // ADC kernel clock source (RCC_CCIPR.ADCSEL). The ADC block's
+    // ADC_CCR.PRESC / CFGR2.CKMODE then scale/route this source.
+    static void select_adc_clock(AdcSource source) {
+        if (source == AdcSource::Hsi16) {
+            // Reset leaves HSI16 off while the system runs from MSI. The ADC
+            // cannot calibrate or convert until its selected kernel clock is
+            // actually running.
+            enable_hsi16();
+        }
+
+        RCC->CCIPR = (RCC->CCIPR & ~RCC_CCIPR_ADCSEL_Msk)
+                   | (static_cast<std::uint32_t>(source)
+                      << RCC_CCIPR_ADCSEL_Pos);
+    }
+
+private:
+    static constexpr SysclkSource sysclk_source(SourceKind kind) {
+        switch (kind) {
+        case SourceKind::Msi: return SysclkSource::Msi;
+        case SourceKind::Hsi16: return SysclkSource::Hsi16;
+        case SourceKind::Hse32: return SysclkSource::Hse32;
+        case SourceKind::Pll: return SysclkSource::Pll;
+        }
+        return SysclkSource::Msi;
+    }
+
+    static void prepare_source(const Source& source) {
+        switch (source.kind) {
+        case SourceKind::Msi:
+            enable_msi(source.msi_range);
+            break;
+        case SourceKind::Hsi16:
+            enable_hsi16();
+            break;
+        case SourceKind::Hse32:
+            enable_hse32(source.hse_div2);
+            break;
+        case SourceKind::Pll:
+            prepare_pll_input(source.pll_config);
+            configure_pll(source.pll_config);
+            break;
+        }
+    }
+
+    static void prepare_pll_input(const PllConfig& pll) {
+        switch (pll.input) {
+        case PllInput::Msi:
+            enable_msi(pll.msi);
+            break;
+        case PllInput::Hsi16:
+            enable_hsi16();
+            break;
+        case PllInput::Hse32:
+            enable_hse32(false);
+            break;
+        }
+    }
+
+    static void enable_msi(MsiRange range) {
+        RCC->CR |= RCC_CR_MSION;
+        while ((RCC->CR & RCC_CR_MSIRDY) == 0u) {
+        }
+
+        const std::uint32_t code = Traits::msi_code(range);
+        RCC->CR = (RCC->CR
+                   & ~(RCC_CR_MSIRANGE_Msk | RCC_CR_MSIRGSEL))
+                | RCC_CR_MSIRGSEL
+                | (code << RCC_CR_MSIRANGE_Pos);
+        while ((RCC->CR & RCC_CR_MSIRDY) == 0u) {
+        }
+    }
+
+    static void enable_hse32(bool divide_by_2) {
+        if (Traits::hse_tcxo) {
+            RCC->CR |= RCC_CR_HSEBYPPWR; // power the TCXO regulator
+        } else {
+            RCC->CR &= ~RCC_CR_HSEBYPPWR;
+        }
+        RCC->CR |= RCC_CR_HSEON;
+        while ((RCC->CR & RCC_CR_HSERDY) == 0u) {
+        }
+        if (divide_by_2) {
+            RCC->CR |= RCC_CR_HSEPRE;
+        } else {
+            RCC->CR &= ~RCC_CR_HSEPRE;
+        }
+    }
+
+    static void configure_pll(const PllConfig& pll) {
+        RCC->CR &= ~RCC_CR_PLLON;
+        while ((RCC->CR & RCC_CR_PLLRDY) != 0u) {
+        }
+
+        std::uint32_t pllcfgr = 0;
+        pllcfgr |= (pll_source_code(pll.input)
+                    << RCC_PLLCFGR_PLLSRC_Pos);
+        pllcfgr |= ((pll.m - 1u) << RCC_PLLCFGR_PLLM_Pos);
+        pllcfgr |= (pll.n << RCC_PLLCFGR_PLLN_Pos);
+        pllcfgr |= ((pll.r - 1u) << RCC_PLLCFGR_PLLR_Pos);
+        pllcfgr |= RCC_PLLCFGR_PLLREN;
+
+        if (pll.p != 0u) {
+            pllcfgr |= ((pll.p - 1u) << RCC_PLLCFGR_PLLP_Pos)
+                     | RCC_PLLCFGR_PLLPEN;
+        }
+        if (pll.q != 0u) {
+            pllcfgr |= ((pll.q - 1u) << RCC_PLLCFGR_PLLQ_Pos)
+                     | RCC_PLLCFGR_PLLQEN;
+        }
+
+        RCC->PLLCFGR = pllcfgr;
+        RCC->CR |= RCC_CR_PLLON;
+        while ((RCC->CR & RCC_CR_PLLRDY) == 0u) {
+        }
+    }
+
+    static constexpr std::uint32_t pll_source_code(PllInput input) {
+        switch (input) {
+        case PllInput::Msi: return 1u;
+        case PllInput::Hsi16: return 2u;
+        case PllInput::Hse32: return 3u;
+        }
+        return 0u;
     }
 
     // VCORE range 1 is the high-performance range. Reset is already range 1;
@@ -204,35 +334,6 @@ public:
         RCC->CFGR = (RCC->CFGR & ~RCC_CFGR_SW_Msk) | sw;
         while ((RCC->CFGR & RCC_CFGR_SWS_Msk) != sws) {
         }
-    }
-
-    // Reset-time clock tree: MSI 4 MHz -> HSI16 16 MHz, AHB/APB1/APB2 /1,
-    // range 1, 0 flash wait states. Call before enabling SysTick-based delays.
-    // Result: HCLK = PCLK1 = PCLK2 = SysTick = 16 MHz.
-    static void use_hsi16_16mhz() {
-        enable_hsi16();
-        ensure_voltage_range1();
-        set_flash_latency(0);
-        set_ahb_divider(AhbDivider::Div1);
-        set_apb1_divider(ApbDivider::Div1);
-        set_apb2_divider(ApbDivider::Div1);
-        select_sysclk(SysclkSource::Hsi16);
-        SystemCoreClockUpdate();
-    }
-
-    // ADC kernel clock source (RCC_CCIPR.ADCSEL). The ADC block's
-    // ADC_CCR.PRESC / CFGR2.CKMODE then scale/route this source.
-    static void select_adc_clock(AdcSource source) {
-        if (source == AdcSource::Hsi16) {
-            // Reset leaves HSI16 off while the system runs from MSI. The ADC
-            // cannot calibrate or convert until its selected kernel clock is
-            // actually running.
-            enable_hsi16();
-        }
-
-        RCC->CCIPR = (RCC->CCIPR & ~RCC_CCIPR_ADCSEL_Msk)
-                   | (static_cast<std::uint32_t>(source)
-                      << RCC_CCIPR_ADCSEL_Pos);
     }
 };
 

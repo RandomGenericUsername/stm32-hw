@@ -126,6 +126,9 @@ different vector tables.
 First vertical slice:
 
 - WL55 clock gate: `RCC_TypeDef` + `offsetof` + CMSIS bit macros
+- WL55 clock tree: device/board `ClockTraits`, declarative
+  `BasicSystemClockConfig`, `WlClock<Traits>::configure()`, and
+  configurable ADC clock policy
 - GPIO: `ModernLayout`, `Port`, `Pin`
 - Device: `GpioA`, `GpioB`, `GpioC`, `GpioH`
 - Driver: stateful `Led`
