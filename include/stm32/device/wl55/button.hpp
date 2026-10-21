@@ -10,6 +10,7 @@
 
 namespace stm32::device::wl55 {
 
+#if !defined(CORE_CM0PLUS)
 // Nucleo-WL55JC B1 / BUTTON_SW1.
 //
 // UM2592 section 6.6.2: B1 is connected to PA0 by default (SB16 ON, SB15 OFF),
@@ -51,5 +52,7 @@ public:
         return !hw::Pin<GpioA, 0, hw::WlClock>::read();
     }
 };
+
+#endif // !CORE_CM0PLUS
 
 } // namespace stm32::device::wl55
