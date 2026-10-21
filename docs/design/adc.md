@@ -120,7 +120,7 @@ round timing.
 ## Layout
 
 ```text
-include/stm32/hw/adc.hpp              # Adc<Impl> facade + AdcResolution
+include/stm32/hw/adc.hpp              # Adc<Impl> facade
 include/stm32/hw/adc/f4.hpp           # F4Adc<Desc>
 include/stm32/hw/adc/h7.hpp           # H7Adc<Desc>
 include/stm32/hw/adc/wl55.hpp         # WlAdc<Desc>
@@ -128,6 +128,16 @@ include/stm32/hw/adc/wl55.hpp         # WlAdc<Desc>
 include/stm32/device/f4/adc.hpp       # Adc1 descriptor
 include/stm32/device/h7/adc.hpp       # Adc1/2/3 descriptors
 include/stm32/device/wl55/adc.hpp     # Adc1 descriptor
+
+include/stm32/drivers/adc.hpp         # AdcDriver<HwAdc> (state + callback)
+include/stm32/drivers/adc_irq.hpp     # AdcIrqRouter<Irq> (shared vectors)
+include/stm32/drivers/f4.hpp          # drivers::f4::Adc1
+include/stm32/drivers/h7.hpp          # drivers::h7::Adc1/2/3
+include/stm32/drivers/wl55.hpp        # drivers::wl55::Adc1
+
+src/drivers/adc_irq_f4.cpp            # library-owned ADC_IRQHandler
+src/drivers/adc_irq_h7.cpp            # ADC_IRQHandler + ADC3_IRQHandler
+src/drivers/adc_irq_wl55.cpp          # library-owned ADC_IRQHandler
 ```
 
 Clock classes gain the gate + kernel source:
@@ -139,56 +149,102 @@ Clock classes gain the gate + kernel source:
 The ADC family implementation sets the divider that lives in the ADC block
 (`F4 ADC_CCR.ADCPRE`, `H7/WL55 ADC_CCR.PRESC`, `WL55 CFGR2.CKMODE`).
 
-## Usage (application side)
+## Driver layer
 
-Interrupt-driven path (primary). The callback is a stateful functor; its type
-is part of the sampler type and the functor is passed at construction:
+`AdcDriver<HwAdc>` is a type-level, stateful driver. `HwAdc` is the stateless
+family facade.
 
 ```cpp
-#include <stm32/drivers/adc_sampler.hpp>
+template <class HwAdc>
+class AdcDriver {
+public:
+    using SampleTime = typename HwAdc::SampleTime;
 
-using Adc1 = stm32::hw::WlAdc<stm32::device::wl55::Adc1>;
+    static void init();
+    static void stop();
 
-struct AdcState {
-    std::uint16_t value = 0;
-    bool busy = false;
+    template <std::uint8_t Channel>
+    static void start(SampleTime sample_time);
+
+    static bool busy();
+    static bool ready();
+    static std::uint16_t take();
+
+    static void set_irq_priority(std::uint32_t priority);
+    static void on_complete(void (*callback)(std::uint16_t));
+
+private:
+    static bool on_irq();   // called by the library ISR/router
+
+    static inline volatile bool busy_ = false;
+    static inline volatile bool ready_ = false;
+    static inline volatile std::uint16_t value_ = 0;
+    static inline void (*callback_)(std::uint16_t) = nullptr;
 };
+```
 
-template <class State>
-struct OnAdcComplete {
-    State& state;
+The driver owns:
 
-    void operator()(std::uint16_t value) const {
-        state.value = value;
-        state.busy = false;
-    }
-};
+- conversion state (`busy_`, `ready_`, `value_`)
+- the optional completion callback
+- the EOC/DR/IRQ handling
+- registration with the IRQ router
 
-using Sampler =
-    stm32::drivers::AdcSampler<Adc1, OnAdcComplete<AdcState>>;
+The application never defines `ADC_IRQHandler`.
 
-static AdcState g_state;
-static Sampler g_adc(OnAdcComplete<AdcState>{g_state});
+## Library-owned ISR
 
-extern "C" void ADC_IRQHandler(void) {
-    g_adc.on_irq();
+Each family has a compiled driver source:
+
+```cpp
+// src/drivers/adc_irq_wl55.cpp
+extern "C" void ADC_IRQHandler(void)
+{
+    stm32::drivers::AdcIrqRouter<ADC_IRQn>::dispatch();
 }
 ```
 
-There is no registration step, no static callback tuple, and no `decltype`.
-The callback contract is `void(std::uint16_t value)`; context is held by the
-functor's members. The sampler owns `ready`/`value`, and `take()` consumes the
-sample if the main loop also wants it.
+- WL55: one ADC, one router.
+- F4: ADC1/2/3 share `ADC_IRQn`; the router dispatches to every registered
+  driver, and each `on_irq()` checks its own `ISR`.
+- H7: ADC1/2 share `ADC_IRQn`; ADC3 has `ADC3_IRQn` and its own router.
 
-Blocking convenience (init/selftest):
+The router is a fixed-size static array of `bool (*)()` handlers. No heap,
+no virtual, no user registration.
+
+## Usage (application side)
 
 ```cpp
+#include <stm32/drivers/wl55.hpp>
+
+using Adc1 = stm32::drivers::wl55::Adc1;
+
+void on_adc(std::uint16_t value) {
+    // optional semantic hook; runs in the ADC interrupt
+    (void)value;
+}
+
 Adc1::init();
-Adc1::configure<13>(Adc1::SampleTime::Cycles12_5); // VREFINT on WL55
-const std::uint16_t raw = Adc1::read<13>();
+Adc1::enable_vrefint();       // WL55 internal channel VIN[13]
+Adc1::set_irq_priority(5);
+Adc1::on_complete(&on_adc);
+
+for (;;) {
+    Adc1::start<13>(Adc1::SampleTime::Cycles160_5);
+
+    while (Adc1::busy()) {
+    }
+
+    const std::uint16_t value = Adc1::take();
+    (void)value;
+    // delay
+}
 ```
 
-For an external channel, the app also configures the pin:
+No user ISR, no sampler object, no state struct, no globals. The driver owns the
+state. The callback is optional; `ready()`/`take()` are sufficient without it.
+
+For an external channel, the app also configures the pin as analog:
 
 ```cpp
 using Pin = stm32::hw::Pin<stm32::device::wl55::GpioA, 0, stm32::hw::WlClock>;
@@ -200,30 +256,42 @@ The pin↔channel mapping is board knowledge and stays in the app.
 
 ## Interrupt path
 
-`start()` enables `EOCIE` and the software trigger. The app owns the vector
-symbol (`ADC_IRQHandler`; `ADC3_IRQHandler` on H7 for ADC3) and calls
-`Sampler::on_irq()`, which clears EOC, stores the value, and runs the functor
-callback. `read()` disables `EOCIE` and polls as an explicit blocking path.
+`AdcDriver::start()` enables `EOCIE` and the software trigger. The vector
+symbol is owned by the compiled driver source:
+
+```text
+ADC EOC
+  -> ADC_IRQHandler              (src/drivers/adc_irq_*.cpp)
+    -> AdcIrqRouter<IRQ>::dispatch()
+      -> AdcDriver<HwAdc>::on_irq()
+        -> read DR / clear EOC / busy=false / ready=true
+        -> optional callback(value)
+```
+
+F4 ADC1/2/3 and H7 ADC1/2 share a vector; each registered driver checks its own
+`ISR` and returns false when the interrupt is not its own. H7 ADC3 uses its own
+`ADC3_IRQHandler`. The app never defines an ISR.
 
 ## First slice
 
 In scope:
 
 - one channel, one conversion, software trigger;
-- interrupt-driven completion (`EOC`) with a stateful functor callback
-  (context lives in the callback object);
-- explicit blocking `read()` kept as a convenience;
+- interrupt-driven completion (`EOC`) owned by the driver;
+- driver-owned state: `busy`, `ready`, `value`;
+- optional `void(std::uint16_t)` completion callback;
+- library-owned ISR with a fixed-size router for shared vectors;
 - fixed 12-bit right-aligned on all three (no resolution argument yet;
   H7 16/14-bit is deferred);
 - family `init()` includes regulator/calibration/ready;
 - delay and NVIC injected as policies (`SysTickDelay` is the reference);
-- three compile checks with the real CMSIS headers;
+- three compile checks plus the three ISR sources with the real CMSIS headers;
 - disassembly checks for gate/clock/init/start/EOCIE/NVIC per family.
 
 Out of scope:
 
-- DMA, interrupts, scan/continuous, injected, analog watchdog,
-  oversampling, differential, multimode;
+- DMA, scan/continuous, injected, analog watchdog, oversampling,
+  differential, multimode;
 - calibration-factor save/restore;
 - channel-to-pin tables (app/board data);
 - F4/H7 `Pin`/`GPIO` device descriptors unless needed by examples.
@@ -242,7 +310,11 @@ Out of scope:
    - F4: `-mcpu=cortex-m4 -DSTM32F411xE`, F4 CMSIS include.
    - H7: `-mcpu=cortex-m7 -DSTM32H755xx -DCORE_CM7`, H7 CMSIS include.
    - WL55: `-mcpu=cortex-m4 -DSTM32WL55xx`, vendored WL55 include.
-2. Disassembly:
+   - Each family's `src/drivers/adc_irq_*.cpp` compiles beside its driver TU.
+2. Link/vector proof in the consumer:
+   - `ADC_IRQHandler` is the strong library symbol, not the weak startup stub.
+   - the vector entry for `ADC_IRQn` points at it.
+3. Disassembly:
    - F4: `RCC_APB2ENR` bit 8, `ADC_CCR.ADCPRE`, `CR2.ADON`, `SQR3/SMPR2`,
      `CR2.SWSTART`, `SR.EOC`, `DR`.
    - H7: `RCC_AHB1ENR` bit 5, `D3CCIPR.ADCSEL`, `ADC_CCR.PRESC`,

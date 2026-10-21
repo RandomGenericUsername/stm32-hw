@@ -105,17 +105,21 @@ application.
 
 ## Build integration
 
-The library is header-only for the first slice. Add the include directory and
-compile/link C++ with `arm-none-eabi-g++`:
+The `hw` and `device` layers are header-only. Drivers that own a vector symbol
+are compiled per family and per core:
 
 ```make
 STM32_HW_DIR = third_party/stm32-hw
 CXXFLAGS += -I$(STM32_HW_DIR)/include -std=c++20 -fno-exceptions -fno-rtti
+
+# per core, e.g. M4/WL55:
+build/M4/adc_irq.o: $(STM32_HW_DIR)/src/drivers/adc_irq_wl55.cpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
 ```
 
-No linker archive is required while it remains header-only. If compiled
-driver sources are added later, build per-core objects or per-core archives
-because the WL55 M4 and M0+ use different `-mcpu` flags.
+Add the matching `adc_irq_<family>.o` to that core's link list. Do not share one
+archive between the WL55 M4 and M0+: they use different `-mcpu` flags and
+different vector tables.
 
 ## Status
 
@@ -129,9 +133,10 @@ First vertical slice:
   (no board-specific button class)
 - ADC: `hw::Adc`, `F4Adc` / `H7Adc` / `WlAdc`; device descriptors
   `device::f4::Adc1`, `device::h7::Adc1/2/3`, `device::wl55::Adc1`;
-  interrupt-driven single conversion with `drivers::AdcSampler`,
-  stateful functor callbacks, injected `Delay`/`Irq` policies
+  stateful `drivers::AdcDriver` + family aliases, library-owned ISR/router,
+  optional callback, injected `Delay`/`Irq` policies
 - Compile check: `tests/compile_check.cpp`
 - ADC compile checks: `tests/adc_compile_f4.cpp`, `adc_compile_h7.cpp`,
-  `adc_compile_wl55.cpp`
-- Design notes: `docs/design/interrupts.md`, `docs/design/adc.md`
+  `adc_compile_wl55.cpp`, plus the three `src/drivers/adc_irq_*.cpp` sources
+- Design notes: `docs/design/interrupts.md`, `docs/design/adc.md`,
+  `docs/design/layers.md`

@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
-# Compile the three ADC family paths against real CMSIS device headers.
+# Compile the three ADC family paths and their library-owned ISR sources
+# against real CMSIS device headers.
 #
 # Required environment:
 #   CMSIS_CORE  CMSIS Core Include dir (core_cm4.h / core_cm7.h)
@@ -25,11 +26,17 @@ COMMON="-std=c++20 -fno-exceptions -fno-rtti -mthumb -mfloat-abi=soft \
 
 "$CXX" $COMMON -mcpu=cortex-m4 -DSTM32F411xE -I"$CMSIS_F4" \
     -c "$ROOT/tests/adc_compile_f4.cpp" -o "$OUT/adc_f4.o"
+"$CXX" $COMMON -mcpu=cortex-m4 -DSTM32F411xE -I"$CMSIS_F4" \
+    -c "$ROOT/src/drivers/adc_irq_f4.cpp" -o "$OUT/adc_irq_f4.o"
 
 "$CXX" $COMMON -mcpu=cortex-m7 -DSTM32H755xx -DCORE_CM7 -I"$CMSIS_H7" \
     -c "$ROOT/tests/adc_compile_h7.cpp" -o "$OUT/adc_h7.o"
+"$CXX" $COMMON -mcpu=cortex-m7 -DSTM32H755xx -DCORE_CM7 -I"$CMSIS_H7" \
+    -c "$ROOT/src/drivers/adc_irq_h7.cpp" -o "$OUT/adc_irq_h7.o"
 
 "$CXX" $COMMON -mcpu=cortex-m4 -DSTM32WL55xx -I"$CMSIS_WL55" \
     -c "$ROOT/tests/adc_compile_wl55.cpp" -o "$OUT/adc_wl55.o"
+"$CXX" $COMMON -mcpu=cortex-m4 -DSTM32WL55xx -I"$CMSIS_WL55" \
+    -c "$ROOT/src/drivers/adc_irq_wl55.cpp" -o "$OUT/adc_irq_wl55.o"
 
 echo "ADC compile checks OK: $OUT"
