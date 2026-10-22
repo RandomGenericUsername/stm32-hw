@@ -16,6 +16,7 @@ struct UartConfig {
     std::uint32_t baud;
     std::uint32_t kernel_hz;
     Source source;
+    bool receive = true;
 
     // Derive the kernel frequency from the selected system clock tree instead
     // of duplicating it in the application. LSE is a board fact and must be
@@ -25,7 +26,8 @@ struct UartConfig {
         const BasicSystemClockConfig<ClockTraits>& sys,
         std::uint32_t baud,
         Source source,
-        std::uint32_t lse_hz = 0u) {
+        std::uint32_t lse_hz = 0u,
+        bool receive = true) {
         std::uint32_t hz = 0u;
         switch (source) {
         case Source::Pclk1:
@@ -41,7 +43,7 @@ struct UartConfig {
             hz = lse_hz;
             break;
         }
-        return UartConfig{baud, hz, source};
+        return UartConfig{baud, hz, source, receive};
     }
 };
 

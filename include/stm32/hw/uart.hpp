@@ -18,6 +18,11 @@ namespace stm32::hw {
 //   static void enable_tx_irq();
 //   static void disable_tx_irq();
 //   static bool tx_irq_pending();
+//   static std::uint8_t read_byte();
+//   static bool rx_ready();
+//   static void enable_rx_irq();
+//   static void disable_rx_irq();
+//   static bool rx_irq_pending();
 //   static void set_irq_priority(std::uint32_t);
 //   static constexpr auto irq();
 //
@@ -62,6 +67,26 @@ public:
 
     static bool tx_irq_pending() {
         return Impl::tx_irq_pending();
+    }
+
+    static std::uint8_t read_byte() {
+        return Impl::read_byte();
+    }
+
+    static bool rx_ready() {
+        return Impl::rx_ready();
+    }
+
+    static void enable_rx_irq() {
+        Impl::enable_rx_irq();
+    }
+
+    static void disable_rx_irq() {
+        Impl::disable_rx_irq();
+    }
+
+    static bool rx_irq_pending() {
+        return Impl::rx_irq_pending();
     }
 
     static void set_irq_priority(std::uint32_t priority) {

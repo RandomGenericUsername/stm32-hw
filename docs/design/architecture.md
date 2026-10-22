@@ -1,9 +1,12 @@
 # Architecture baseline
 
-Status: baseline
+Status: baseline + UART RX addendum
 Date: 2026-10-22
 Baseline tag: `architecture-baseline-20261022`
-Scope: STM32WL55JC / NUCLEO-WL55JC, ADC + LPUART TX + clock tree
+Scope: STM32WL55JC / NUCLEO-WL55JC, ADC + LPUART TX/RX + clock tree
+
+UART RX was added after the baseline tag without changing layer ownership;
+the UART driver owns both directions and the ISR handles TXE and RXNE.
 
 ## Purpose
 
@@ -92,8 +95,8 @@ board
 | `RCC_CCIPR.LPUART1SEL` | `hw::WlLpuart` via `hw::WlClock` |
 | UART BRR / 8N1 TX | `hw::WlLpuart` |
 | UART clock-source encodings | `device::wl55::UartClockTraits` |
-| UART TX ring / ISR state | `drivers::UartDriver` |
-| UART ISR | `src/drivers/uart_irq_wl55.cpp` |
+| UART TX/RX rings / ISR state | `drivers::UartDriver` |
+| UART ISR (TXE + RXNE) | `src/drivers/uart_irq_wl55.cpp` |
 | GPIO mode / AF / pull | app using `hw::Pin` |
 | IRQ priority policy | app, passed to the driver |
 | Source list / library objects | `config/sources.mk` |
@@ -158,6 +161,8 @@ ADC:
 UART:
     LPUART1_IRQHandler
       -> UartDriver::on_irq()
+        -> RXNE: read RDR into the RX ring (or drop + overrun flag)
+        -> TXE:  write the next TX ring byte
 ```
 
 The vector symbols are compiled sources, not header-inline code:
@@ -180,7 +185,9 @@ busy_, ready_, value_, callback_
 `UartDriver` owns:
 
 ```text
-TX ring buffer, head_, tail_
+TX ring buffer + indices
+RX ring buffer + indices
+RX overrun flag
 ```
 
 Both are type-level singletons, matching the one-physical-peripheral model.
@@ -237,7 +244,7 @@ EXTRA_INC_M4  = -Ithird_party/stm32-hw/include
 
 - F4/H7 `ClockTraits` and family clock implementations.
 - H7 D1/D2/D3 clock-domain configuration.
-- UART RX ring and callbacks.
+- UART RX callbacks / command parser (polling `read()` is implemented).
 - USART1/USART2 descriptors and gates.
 - Runtime clock switching / DVFS.
 - MCO/LSCO configuration.

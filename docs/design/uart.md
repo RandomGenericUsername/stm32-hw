@@ -1,6 +1,6 @@
 # UART — WL55 LPUART (NUCLEO-WL55JC VCP)
 
-Status: implemented (TX slice)
+Status: implemented (TX + RX slice)
 Date: 2026-10-22
 Target: NUCLEO-WL55JC (STM32WL55JC)
 
@@ -11,8 +11,9 @@ The library provides UART **mechanisms**:
 - RCC gate for the peripheral,
 - kernel-clock mux write (`RCC_CCIPR.LPUART1SEL`),
 - BRR computation from the supplied kernel frequency and baud rate,
-- 8N1 transmitter enable, byte write, TXE/TC status,
-- TXE interrupt enable/disable and IRQ priority.
+- 8N1 transmitter/receiver enable, byte write, TXE/TC status,
+- RXNE status and RDR read,
+- TXE/RXNE interrupt enable/disable and IRQ priority.
 
 The application owns board policy:
 
@@ -43,13 +44,15 @@ struct UartConfig {
     std::uint32_t baud;
     std::uint32_t kernel_hz;
     typename Traits::Source source;
+    bool receive = true;
 
     template <class ClockTraits>
     static constexpr UartConfig from_system(
         const BasicSystemClockConfig<ClockTraits>& sys,
         std::uint32_t baud,
         typename Traits::Source source,
-        std::uint32_t lse_hz = 0u);
+        std::uint32_t lse_hz = 0u,
+        bool receive = true);
 };
 
 template <class Impl, class Traits>
@@ -63,6 +66,11 @@ class Uart {
     static void enable_tx_irq();
     static void disable_tx_irq();
     static bool tx_irq_pending();
+    static std::uint8_t read_byte();
+    static bool rx_ready();
+    static void enable_rx_irq();
+    static void disable_rx_irq();
+    static bool rx_irq_pending();
     static void set_irq_priority(std::uint32_t);
     static constexpr auto irq();
 };
@@ -93,11 +101,16 @@ class UartDriver {
     static bool init(const typename HwUart::Config&);
     static void write(const char*);
     static void write(const std::uint8_t*, std::size_t);
-    static void write_byte(std::uint8_t); // blocks while the ring is full
+    static void write_byte(std::uint8_t); // blocks while the TX ring is full
     static void flush();                  // waits for TC
     static bool empty();
     static std::size_t pending();
-    static bool on_irq();                 // called by the library ISR
+    static bool read(std::uint8_t&);      // non-blocking RX read
+    static bool rx_empty();
+    static std::size_t rx_pending();
+    static bool rx_overrun();
+    static void clear_rx_overrun();
+    static bool on_irq();                 // TXE and RXNE
 };
 ```
 
@@ -107,12 +120,21 @@ class UartDriver {
 
 `src/drivers/uart_irq_wl55.cpp` defines `LPUART1_IRQHandler` and calls
 `drivers::wl55::Lpuart1::on_irq()`. The application never defines the vector
-and never touches TXE. This mirrors the ADC split.
+and never touches TXE or RXNE. This mirrors the ADC split.
 
-The ring buffer is single-producer/single-consumer: `head_` is written only by
-thread context, `tail_` only by the interrupt. Both are `volatile`; no lock is
-needed on a single core. Capacity includes one sentinel slot, so 128 slots hold
-127 bytes.
+TX and RX each have their own single-producer/single-consumer ring:
+
+```text
+TX: application writes head_, interrupt reads tail_
+RX: interrupt writes head_, application reads tail_
+```
+
+Both are `volatile`; no lock is needed on a single core. Capacity includes one
+sentinel slot, so 128 slots hold 127 bytes per direction.
+
+The ISR handles RXNE and TXE in one entry. If the RX ring is full, it still
+reads `RDR` to clear RXNE and sets `rx_overrun_`; the byte is dropped. The
+application can poll `rx_overrun()`/`clear_rx_overrun()`.
 
 ## BRR
 
@@ -137,8 +159,10 @@ At PCLK1 = 16 MHz and 115200 baud: `BRR = 35556 (0x8AE4)`.
 - `static_assert` covers `brr_for(16 MHz, 115200) == 35556`,
   `brr_for(32 MHz, 115200) == 71111`, `brr_for(LSE, 9600) == 874` and the
   zero-baud guard.
-- `wl55jc` `mu build`: M4 3676 text / 16 data / 184 bss
-  (128-byte TX ring + driver state).
+- `wl55jc` `mu build`: M4 4972 text / 16 data / 320 bss
+  (128-byte TX ring + 128-byte RX ring + driver state).
+- Live loopback: sending `hello uart rx\r\n` to the VCP echoed the same text.
+- PA3 is configured as `LPUART1_RX` in AF8; `RE` and `RXNEIE` are enabled.
 - `LPUART1_IRQHandler` strong at `0x08000a14`; vector IRQ 38 at
   `0x080000d8` = `0x08000a15`.
 - `main` disassembly: APB1ENR2 bit 0 set, `CCIPR[11:10] = 00` (PCLK1),
@@ -147,7 +171,8 @@ At PCLK1 = 16 MHz and 115200 baud: `BRR = 35556 (0x8AE4)`.
 
 ## Not in this slice
 
-- RX / receive ring buffer and callbacks.
+- RX callbacks / command parsing (polling `read()` is implemented).
 - USART1 / USART2 instances and their gates.
 - DMA, flow control, parity, word lengths other than 8N1.
-- Error interrupts (ORE/FE/NE).
+- Error interrupts (ORE/FE/NE); RX overrun at the ring level is tracked, but
+  hardware error interrupts are not enabled.

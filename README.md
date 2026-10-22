@@ -142,6 +142,9 @@ First vertical slice:
   optional callback, injected `Delay`/`Irq` policies
 - WL55 VREFINT factory calibration (system memory) and calibrated
   `VREF+` conversion in millivolts (`drivers::wl55::Adc1`)
+- UART: WL55 LPUART TX/RX (`hw::WlLpuart`, `drivers::UartDriver`),
+  ring buffers, library-owned `LPUART1_IRQHandler`
+- UART compile check: `tests/uart_compile_wl55.cpp` + `compile_uart.sh`
 - Compile check: `tests/compile_check.cpp`
 - ADC compile checks: `tests/adc_compile_f4.cpp`, `adc_compile_h7.cpp`,
   `adc_compile_wl55.cpp`, plus the three `src/drivers/adc_irq_*.cpp` sources

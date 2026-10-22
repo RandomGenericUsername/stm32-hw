@@ -59,13 +59,17 @@ public:
         uart->CR3 = 0u;
         uart->BRR = brr;
         uart->CR1 = USART_CR1_TE | USART_CR1_UE;
+        if (config.receive) {
+            uart->CR1 |= USART_CR1_RE;
+        }
         return true;
     }
 
     static void disable() {
         Irq::disable(Desc::irq());
         auto* uart = Desc::regs();
-        uart->CR1 &= ~(USART_CR1_TXEIE_TXFNFIE | USART_CR1_TE | USART_CR1_UE);
+        uart->CR1 &= ~(USART_CR1_TXEIE_TXFNFIE | USART_CR1_RXNEIE_RXFNEIE
+                       | USART_CR1_TE | USART_CR1_RE | USART_CR1_UE);
     }
 
     static void write_byte(std::uint8_t value) {
@@ -91,6 +95,27 @@ public:
 
     static bool tx_irq_pending() {
         return tx_ready(); // TXE is the level that drives the interrupt
+    }
+
+    static std::uint8_t read_byte() {
+        return static_cast<std::uint8_t>(Desc::regs()->RDR);
+    }
+
+    static bool rx_ready() {
+        return (Desc::regs()->ISR & USART_ISR_RXNE_RXFNE) != 0u;
+    }
+
+    static void enable_rx_irq() {
+        Desc::regs()->CR1 |= USART_CR1_RXNEIE_RXFNEIE;
+        Irq::enable(Desc::irq());
+    }
+
+    static void disable_rx_irq() {
+        Desc::regs()->CR1 &= ~USART_CR1_RXNEIE_RXFNEIE;
+    }
+
+    static bool rx_irq_pending() {
+        return rx_ready();
     }
 
     static void set_irq_priority(std::uint32_t priority) {

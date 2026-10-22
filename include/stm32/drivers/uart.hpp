@@ -5,32 +5,48 @@
 
 namespace stm32::drivers {
 
-// Type-level UART driver with an interrupt-driven TX ring buffer.
+// Type-level UART driver with interrupt-driven TX and RX ring buffers.
 //
 // HwUart is the stateless hardware facade (WlLpuart, ...). This class owns the
-// buffer, the indices and the interrupt bookkeeping. The ISR symbol is emitted
+// buffers, the indices and the interrupt bookkeeping. The ISR symbol is emitted
 // by the compiled driver source (src/drivers/uart_irq_<family>.cpp), which
 // calls on_irq().
 //
-// Single-producer/single-consumer: the application writes from thread context,
-// the interrupt drains. head_ is only written by the producer, tail_ only by
-// the consumer; both are volatile. Capacity includes one sentinel slot.
-template <class HwUart, std::size_t Capacity = 128>
+// Single-producer/single-consumer per direction: the application writes TX
+// from thread context, the interrupt drains it; the interrupt fills RX, the
+// application reads it. Each index is written by one side only.
+template <class HwUart,
+          std::size_t TxCapacity = 128,
+          std::size_t RxCapacity = TxCapacity>
 class UartDriver {
-    static_assert(Capacity >= 2, "UART ring buffer needs at least two slots");
-    static_assert(Capacity <= 0xFFFFu, "UART ring buffer index is 16-bit");
+    static_assert(TxCapacity >= 2, "UART TX ring needs at least two slots");
+    static_assert(RxCapacity >= 2, "UART RX ring needs at least two slots");
+    static_assert(TxCapacity <= 0xFFFFu, "UART TX index is 16-bit");
+    static_assert(RxCapacity <= 0xFFFFu, "UART RX index is 16-bit");
 
 public:
     static bool init(const typename HwUart::Config& config) {
-        head_ = 0;
-        tail_ = 0;
-        return HwUart::init(config);
+        tx_head_ = 0;
+        tx_tail_ = 0;
+        rx_head_ = 0;
+        rx_tail_ = 0;
+        rx_overrun_ = false;
+
+        if (!HwUart::init(config)) {
+            return false;
+        }
+        if (config.receive) {
+            HwUart::enable_rx_irq();
+        }
+        return true;
     }
 
     static void stop() {
         HwUart::disable();
-        head_ = 0;
-        tail_ = 0;
+        tx_head_ = 0;
+        tx_tail_ = 0;
+        rx_head_ = 0;
+        rx_tail_ = 0;
     }
 
     static void write(const char* text) {
@@ -46,30 +62,59 @@ public:
         }
     }
 
-    // Blocks while the ring is full, so no byte is dropped.
+    // Blocks while the TX ring is full, so no byte is dropped.
     static void write_byte(std::uint8_t value) {
-        while (full()) {
+        while (tx_full()) {
         }
-        buffer_[head_] = value;
-        head_ = next(head_);
+        tx_buffer_[tx_head_] = value;
+        tx_head_ = next(tx_head_, TxCapacity);
         HwUart::enable_tx_irq();
     }
 
-    // Wait until every queued byte has left the shift register.
+    // Wait until every queued TX byte has left the shift register.
     static void flush() {
-        while (!empty()) {
+        while (!tx_empty()) {
         }
         while (!HwUart::tx_complete()) {
         }
     }
 
     static bool empty() {
-        return head_ == tail_;
+        return tx_empty();
     }
 
     static std::size_t pending() {
         return static_cast<std::size_t>(
-            (static_cast<std::uint32_t>(head_) + Capacity - tail_) % Capacity);
+            (static_cast<std::uint32_t>(tx_head_) + TxCapacity - tx_tail_)
+            % TxCapacity);
+    }
+
+    // Non-blocking RX read. Returns false when the RX ring is empty.
+    static bool read(std::uint8_t& value) {
+        if (rx_empty()) {
+            return false;
+        }
+        value = rx_buffer_[rx_tail_];
+        rx_tail_ = next(rx_tail_, RxCapacity);
+        return true;
+    }
+
+    static bool rx_empty() {
+        return rx_head_ == rx_tail_;
+    }
+
+    static std::size_t rx_pending() {
+        return static_cast<std::size_t>(
+            (static_cast<std::uint32_t>(rx_head_) + RxCapacity - rx_tail_)
+            % RxCapacity);
+    }
+
+    static bool rx_overrun() {
+        return rx_overrun_;
+    }
+
+    static void clear_rx_overrun() {
+        rx_overrun_ = false;
     }
 
     static void set_irq_priority(std::uint32_t priority) {
@@ -77,32 +122,60 @@ public:
     }
 
     // Called by the library-owned vector. Returns true when the interrupt
-    // belonged to this UART.
+    // belonged to this UART. Handles both directions in one entry.
     static bool on_irq() {
-        if (!HwUart::tx_irq_pending()) {
-            return false;
+        bool handled = false;
+
+        if (HwUart::rx_irq_pending()) {
+            handled = true;
+            const std::uint8_t value = HwUart::read_byte();
+            if (!rx_full()) {
+                rx_buffer_[rx_head_] = value;
+                rx_head_ = next(rx_head_, RxCapacity);
+            } else {
+                // Drop the byte but still read RDR above to clear RXNE.
+                rx_overrun_ = true;
+            }
         }
-        if (empty()) {
-            HwUart::disable_tx_irq();
-            return true;
+
+        if (HwUart::tx_irq_pending()) {
+            handled = true;
+            if (tx_empty()) {
+                HwUart::disable_tx_irq();
+            } else {
+                HwUart::write_byte(tx_buffer_[tx_tail_]);
+                tx_tail_ = next(tx_tail_, TxCapacity);
+            }
         }
-        HwUart::write_byte(buffer_[tail_]);
-        tail_ = next(tail_);
-        return true;
+
+        return handled;
     }
 
 private:
-    static constexpr std::uint16_t next(std::uint16_t index) {
-        return static_cast<std::uint16_t>((index + 1u) % Capacity);
+    static constexpr std::uint16_t next(std::uint16_t index,
+                                        std::size_t capacity) {
+        return static_cast<std::uint16_t>((index + 1u) % capacity);
     }
 
-    static bool full() {
-        return next(head_) == tail_;
+    static bool tx_empty() {
+        return tx_head_ == tx_tail_;
     }
 
-    static inline volatile std::uint16_t head_ = 0;
-    static inline volatile std::uint16_t tail_ = 0;
-    static inline volatile std::uint8_t buffer_[Capacity] = {};
+    static bool tx_full() {
+        return next(tx_head_, TxCapacity) == tx_tail_;
+    }
+
+    static bool rx_full() {
+        return next(rx_head_, RxCapacity) == rx_tail_;
+    }
+
+    static inline volatile std::uint16_t tx_head_ = 0;
+    static inline volatile std::uint16_t tx_tail_ = 0;
+    static inline volatile std::uint16_t rx_head_ = 0;
+    static inline volatile std::uint16_t rx_tail_ = 0;
+    static inline volatile bool rx_overrun_ = false;
+    static inline volatile std::uint8_t tx_buffer_[TxCapacity] = {};
+    static inline volatile std::uint8_t rx_buffer_[RxCapacity] = {};
 };
 
 } // namespace stm32::drivers
