@@ -31,6 +31,23 @@ using Adc1 = stm32::drivers::f4::Adc1; // AdcDriver<F4Adc<...>>
 `MyDelay` only needs `init()` and `wait_us(uint32_t)`. `MyNvic` needs
 `enable/disable/clear_pending/set_priority`.
 
+## UART (WL55 LPUART)
+
+`compile_uart.sh` compiles the WL55 LPUART driver path and its library-owned
+ISR source:
+
+- `uart_compile_wl55.cpp` — STM32WL55JC, `-mcpu=cortex-m4 -DSTM32WL55xx`
+- `src/drivers/uart_irq_wl55.cpp` — defines `LPUART1_IRQHandler`
+
+```sh
+export CMSIS_CORE=/path/to/CMSIS/Core/Include
+export CMSIS_WL55=/path/to/cmsis_device_wl/Include
+./tests/compile_uart.sh
+```
+
+It uses `drivers::wl55::Lpuart1`, the default `WlNvic` policy, a `UartConfig`
+supplied by the caller, and `static_assert`s on `brr_for()`.
+
 The library does not vendor CMSIS. Point the script at the device headers from
 the consuming projects:
 

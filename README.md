@@ -115,6 +115,8 @@ CXXFLAGS += -I$(STM32_HW_DIR)/include -std=c++20 -fno-exceptions -fno-rtti
 # per core, e.g. M4/WL55:
 build/M4/adc_irq.o: $(STM32_HW_DIR)/src/drivers/adc_irq_wl55.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
+build/M4/uart_irq.o: $(STM32_HW_DIR)/src/drivers/uart_irq_wl55.cpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
 ```
 
 Add the matching `adc_irq_<family>.o` to that core's link list. Do not share one

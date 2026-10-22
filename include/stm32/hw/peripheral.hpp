@@ -12,6 +12,7 @@ enum class Peripheral : std::uint16_t {
     GpioC,
     GpioH,
     Usart1,
+    Lpuart1,
     Adc1,
     Adc2,
     Adc3,

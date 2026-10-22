@@ -71,7 +71,21 @@ core:
 src/drivers/adc_irq_f4.cpp
 src/drivers/adc_irq_h7.cpp
 src/drivers/adc_irq_wl55.cpp
+src/drivers/uart_irq_wl55.cpp
 ```
 
 The consuming project adds the matching source to its core object list. The
 rest of the library remains header-only.
+
+## UART as the second reference
+
+```text
+hw::WlLpuart<device::wl55::Lpuart1>   stateless register operations
+drivers::wl55::Lpuart1                ring buffer, ISR, lifecycle
+LPUART1_IRQHandler                    compiled driver source, library-owned
+app: main.cpp                         pin AF, UartConfig, write/flush
+```
+
+The split is the same as the ADC: the driver owns state and the vector, the
+hardware facade only touches registers, and the application supplies board
+facts (pins, baud, kernel clock).

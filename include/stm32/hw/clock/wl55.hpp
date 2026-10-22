@@ -65,6 +65,15 @@ class WlGate<Peripheral::Usart1>
           RCC_APB2RSTR_USART1RST_Pos> {};
 
 template <>
+class WlGate<Peripheral::Lpuart1>
+    : public RccGate<
+          RCC_BASE,
+          offsetof(RCC_TypeDef, APB1ENR2),
+          RCC_APB1ENR2_LPUART1EN_Pos,
+          offsetof(RCC_TypeDef, APB1RSTR2),
+          RCC_APB1RSTR2_LPUART1RST_Pos> {};
+
+template <>
 class WlGate<Peripheral::Adc1>
     : public RccGate<
           RCC_BASE,
@@ -156,6 +165,14 @@ public:
         RCC->CCIPR = (RCC->CCIPR & ~RCC_CCIPR_ADCSEL_Msk)
                    | ((source_code << RCC_CCIPR_ADCSEL_Pos)
                       & RCC_CCIPR_ADCSEL_Msk);
+    }
+
+    // Write RCC_CCIPR.LPUART1SEL. The UART layer owns the source enum and the
+    // baud clock frequency; this only performs the mux write.
+    static void select_lpuart1_clock(std::uint32_t source_code) {
+        RCC->CCIPR = (RCC->CCIPR & ~RCC_CCIPR_LPUART1SEL_Msk)
+                   | ((source_code << RCC_CCIPR_LPUART1SEL_Pos)
+                      & RCC_CCIPR_LPUART1SEL_Msk);
     }
 
 private:

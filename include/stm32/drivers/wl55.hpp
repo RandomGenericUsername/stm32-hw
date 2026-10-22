@@ -3,8 +3,11 @@
 #include <cstdint>
 
 #include "stm32/device/wl55/adc.hpp"
+#include "stm32/device/wl55/uart.hpp"
 #include "stm32/drivers/adc.hpp"
+#include "stm32/drivers/uart.hpp"
 #include "stm32/hw/adc/wl55.hpp"
+#include "stm32/hw/uart/wl55.hpp"
 
 namespace stm32::drivers::wl55 {
 
@@ -39,5 +42,7 @@ public:
         return vrefplus_millivolts(HwAdc::vrefint_cal(), vrefint_raw);
     }
 };
+
+class Lpuart1 final : public UartDriver<hw::WlLpuart<device::wl55::Lpuart1>> {};
 
 } // namespace stm32::drivers::wl55
