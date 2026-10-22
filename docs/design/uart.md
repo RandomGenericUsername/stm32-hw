@@ -43,6 +43,13 @@ struct UartConfig {
     std::uint32_t baud;
     std::uint32_t kernel_hz;
     typename Traits::Source source;
+
+    template <class ClockTraits>
+    static constexpr UartConfig from_system(
+        const BasicSystemClockConfig<ClockTraits>& sys,
+        std::uint32_t baud,
+        typename Traits::Source source,
+        std::uint32_t lse_hz = 0u);
 };
 
 template <class Impl, class Traits>
@@ -73,6 +80,10 @@ class WlLpuart final
 The source encoding is an MCU fact in
 `device::wl55::UartClockTraits` (`Pclk1`, `Sysclk`, `Hsi16`, `Lse`), matching
 the `AdcClockTraits` split. The generic `hw` layer only carries the value.
+
+The app derives `kernel_hz` from the selected system clock tree with
+`UartConfig::from_system(...)` instead of duplicating the frequency. LSE is a
+board fact and is supplied explicitly when selected.
 
 Driver:
 

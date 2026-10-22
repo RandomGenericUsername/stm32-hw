@@ -56,14 +56,23 @@ public:
         Delay::init();
         Clock::template enable<Desc::id>();
 
+        auto* adc = Desc::regs();
+
+        // CKMODE/PRESC may only be written while the ADC is fully idle.
+        // init() is one-shot: an already active ADC keeps its configuration.
+        constexpr std::uint32_t kBusy =
+            ADC_CR_ADEN | ADC_CR_ADCAL | ADC_CR_ADSTART
+            | ADC_CR_ADSTP | ADC_CR_ADDIS;
+        if ((adc->CR & kBusy) != 0u) {
+            return;
+        }
+
         // The ADC owns the source choice; RCC only writes the ADCSEL mux.
         if (adc_clock.source == AdcTraits::Source::Hsi16) {
             Clock::enable_hsi16();
         }
         Clock::select_adc_clock(
             static_cast<std::uint32_t>(adc_clock.source));
-
-        auto* adc = Desc::regs();
 
         // ADC-local clock mode and asynchronous prescaler.
         adc->CFGR2 = (adc->CFGR2 & ~ADC_CFGR2_CKMODE_Msk)
@@ -77,10 +86,6 @@ public:
         if ((adc->CR & ADC_CR_ADVREGEN) == 0u) {
             adc->CR |= ADC_CR_ADVREGEN;
             Delay::wait_us(20); // regulator start-up (hardware-mandated)
-        }
-
-        if ((adc->CR & ADC_CR_ADEN) != 0u) {
-            return;
         }
 
         adc->CR |= ADC_CR_ADCAL;

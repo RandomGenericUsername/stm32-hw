@@ -145,5 +145,6 @@ First vertical slice:
 - Compile check: `tests/compile_check.cpp`
 - ADC compile checks: `tests/adc_compile_f4.cpp`, `adc_compile_h7.cpp`,
   `adc_compile_wl55.cpp`, plus the three `src/drivers/adc_irq_*.cpp` sources
-- Design notes: `docs/design/interrupts.md`, `docs/design/adc.md`,
-  `docs/design/layers.md`, `docs/design/clock.md`
+- Design notes: `docs/design/architecture.md`, `docs/design/interrupts.md`,
+  `docs/design/adc.md`, `docs/design/layers.md`, `docs/design/clock.md`,
+  `docs/design/uart.md`

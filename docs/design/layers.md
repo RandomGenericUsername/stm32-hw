@@ -9,9 +9,14 @@ behavior lives in a driver layer.
 app       board wiring, main loop, optional callbacks
 drivers   stateful peripheral drivers, ISR ownership, lifecycle, callbacks
 hw        stateless register mechanisms
-device    MCU facts (register pointers, peripheral IDs, IRQ numbers)
+device    MCU facts (register pointers, peripheral IDs, IRQ numbers,
+          oscillator/PLL/clock facts)
+board     board facts (actual HSE/LSE clocks, board-level constraints)
 CMSIS     vendor headers
 ```
+
+The frozen layer/ownership baseline is
+[`architecture.md`](architecture.md).
 
 ## Rules
 
@@ -24,8 +29,16 @@ CMSIS     vendor headers
 
 ### `device`
 
-- MCU facts only: base pointers, peripheral IDs, IRQ numbers.
+- MCU facts only: base pointers, peripheral IDs, IRQ numbers, oscillator
+  ranges, PLL limits, flash-latency rules, peripheral clock-source encodings.
 - No board wiring, no application flow, no state.
+
+### `board`
+
+- Board facts only: actual external clocks, board-level constraints.
+- Example: `board::nucleo_wl55jc::Clock` with HSE = 32 MHz TCXO.
+- No application flow, no pin policy unless it becomes a reusable board
+  descriptor later.
 
 ### `drivers`
 
