@@ -2,16 +2,45 @@
 
 Cross-family bare-metal C++ hardware abstraction library for STM32 MCUs.
 
-The library is split into three layers:
+The repository root is organized by MCU family:
 
 ```text
-drivers      stateful classes (Led, Uart, Spi, ...)
-hw           stateless type-level hardware facade (WlClock, GpioB, Pin)
-device       family/device descriptors (CMSIS pointers + peripheral identities)
+core/        device-independent mechanisms
+wl5x/        STM32WL5x family
+f4/          STM32F4 family
+h7/          STM32H7 family
 ```
 
-The `hw` and `device` layers are header-only. Drivers may become compiled
-sources later; the first slice is header-only.
+Boards live under their family, for example:
+
+```text
+wl5x/boards/nucleo_wl55jc/
+```
+
+Within a family, the conceptual layers remain:
+
+```text
+hw           stateless type-level hardware facade
+device       MCU facts (CMSIS pointers + peripheral identities)
+drivers      stateful classes (Led, Uart, Adc, ...)
+board        board clock and pin facts
+```
+
+The core and family headers are header-only. Drivers that own vector symbols
+are compiled per family.
+
+## Include rule
+
+Use only the include roots for the selected family:
+
+```make
+-I$(STM32_HW_DIR)/core/include
+-I$(STM32_HW_DIR)/wl5x/include
+-I$(STM32_HW_DIR)/wl5x/boards/nucleo_wl55jc/include
+```
+
+The repository root is deliberately **not** an include root. A WL5x build must
+not be able to include `stm32/f4/...` or `stm32/h7/...`.
 
 ## Design rules
 
@@ -45,10 +74,13 @@ The WL55 headers are included as `<stm32wl55xx.h>`.
 ## Usage
 
 ```cpp
-#include <stm32/device/wl55/gpio.hpp>
-#include <stm32/drivers/led.hpp>
+#include <stm32/wl5x/device/wl55/gpio.hpp>
+#include <stm32/wl5x/clock/wl55.hpp>
+#include <stm32/board/nucleo_wl55jc/board.hpp>
+#include <stm32/core/drivers/led.hpp>
 
-using LedPin = stm32::hw::Pin<stm32::device::wl55::GpioB, 15, stm32::hw::WlClock>;
+using Clock = stm32::hw::WlClock<stm32::board::nucleo_wl55jc::Clock>;
+using LedPin = stm32::hw::Pin<stm32::device::wl55::GpioB, 15, Clock>;
 using Led = stm32::drivers::Led<LedPin>;
 
 void app_main() {
@@ -70,8 +102,8 @@ the generic stateful driver. The library has no board-specific LED alias.
 The application composes the flow from primitives:
 
 ```cpp
-#include <stm32/hw/exti/wl55.hpp>
-#include <stm32/hw/nvic/wl55.hpp>
+#include <stm32/wl5x/exti.hpp>
+#include <stm32/wl5x/nvic.hpp>
 
 using ButtonPin = stm32::hw::Pin<stm32::device::wl55::GpioA, 0, stm32::hw::WlClock>;
 
@@ -105,21 +137,24 @@ application.
 
 ## Build integration
 
-The `hw` and `device` layers are header-only. Drivers that own a vector symbol
+The core and family headers are header-only. Drivers that own a vector symbol
 are compiled per family and per core:
 
 ```make
 STM32_HW_DIR = third_party/stm32-hw
-CXXFLAGS += -I$(STM32_HW_DIR)/include -std=c++20 -fno-exceptions -fno-rtti
+CXXFLAGS += -I$(STM32_HW_DIR)/core/include \
+            -I$(STM32_HW_DIR)/wl5x/include \
+            -I$(STM32_HW_DIR)/wl5x/boards/nucleo_wl55jc/include \
+            -std=c++20 -fno-exceptions -fno-rtti
 
 # per core, e.g. M4/WL55:
-build/M4/adc_irq.o: $(STM32_HW_DIR)/src/drivers/adc_irq_wl55.cpp
+build/M4/adc_irq.o: $(STM32_HW_DIR)/wl5x/src/irq/adc.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
-build/M4/uart_irq.o: $(STM32_HW_DIR)/src/drivers/uart_irq_wl55.cpp
+build/M4/uart_irq.o: $(STM32_HW_DIR)/wl5x/src/irq/uart.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 ```
 
-Add the matching `adc_irq_<family>.o` to that core's link list. Do not share one
+Add the matching family IRQ objects to that core's link list. Do not share one
 archive between the WL55 M4 and M0+: they use different `-mcpu` flags and
 different vector tables.
 
@@ -145,10 +180,9 @@ First vertical slice:
 - UART: WL55 LPUART TX/RX (`hw::WlLpuart`, `drivers::UartDriver`),
   ring buffers, `UartHandler` concept policy, library-owned
   `LPUART1_IRQHandler`
-- UART compile check: `tests/uart_compile_wl55.cpp` + `compile_uart.sh`
-- Compile check: `tests/compile_check.cpp`
-- ADC compile checks: `tests/adc_compile_f4.cpp`, `adc_compile_h7.cpp`,
-  `adc_compile_wl55.cpp`, plus the three `src/drivers/adc_irq_*.cpp` sources
-- Design notes: `docs/design/architecture.md`, `docs/design/interrupts.md`,
-  `docs/design/adc.md`, `docs/design/layers.md`, `docs/design/clock.md`,
-  `docs/design/uart.md`
+- UART compile check: `wl5x/tests/uart.cpp` + `compile_uart.sh`
+- Compile check: `wl5x/tests/compile_check.cpp`
+- ADC compile checks: `f4/tests/adc.cpp`, `h7/tests/adc.cpp`,
+  `wl5x/tests/adc.cpp`, plus the family `src/irq/adc.cpp` sources
+- Design notes: `docs/architecture.md`, `docs/interrupts.md`,
+  `docs/adc.md`, `docs/layers.md`, `docs/clock.md`, `docs/uart.md`
