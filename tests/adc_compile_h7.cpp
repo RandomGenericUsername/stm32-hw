@@ -6,25 +6,27 @@
 
 #include "stm32/drivers/h7.hpp"
 
-using Adc1 = stm32::drivers::h7::Adc1;
-using Adc3 = stm32::drivers::h7::Adc3;
+struct Adc1Handler {
+    void on_complete(std::uint16_t value) {
+        (void)value;
+    }
+};
 
-void on_adc_h7_1(std::uint16_t value) {
-    (void)value;
-}
+struct Adc3Handler {
+    void on_complete(std::uint16_t value) {
+        (void)value;
+    }
+};
 
-void on_adc_h7_3(std::uint16_t value) {
-    (void)value;
-}
+using Adc1 = stm32::drivers::h7::Adc1<Adc1Handler>;
+using Adc3 = stm32::drivers::h7::Adc3<Adc3Handler>;
 
 extern "C" std::uint16_t adc_h7_check() {
     Adc1::init();
-    Adc1::on_complete(&on_adc_h7_1);
     Adc1::set_irq_priority(15);
     Adc1::start<0>(Adc1::SampleTime::Cycles12_5);
 
     Adc3::init();
-    Adc3::on_complete(&on_adc_h7_3);
     Adc3::set_irq_priority(15);
     Adc3::start<0>(Adc3::SampleTime::Cycles12_5);
 

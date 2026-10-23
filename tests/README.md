@@ -16,16 +16,26 @@ library-owned ISR source:
 - `adc_compile_wl55.cpp` — STM32WL55JC, `-mcpu=cortex-m4 -DSTM32WL55xx`
 - `src/drivers/adc_irq_f4.cpp`, `..._h7.cpp`, `..._wl55.cpp`
 
-Each test uses the type-level driver (`drivers::f4::Adc1`, `drivers::h7::Adc1/3`,
-`drivers::wl55::Adc1`), the default `SysTickDelay`/family-NVIC policies, and an
-optional free-function completion callback. The vector symbol
-(`ADC_IRQHandler` / `ADC3_IRQHandler`) is defined by the library ISR source, not
-by the application.
+Each test uses the type-level driver (`drivers::f4::Adc1<Handler>`,
+`drivers::h7::Adc1<Handler>/Adc3<Handler>`, `drivers::wl55::Adc1<Handler>`),
+the default `SysTickDelay`/family-NVIC policies, and a compile-time handler.
+The handler is an object owned by the driver:
+
+```cpp
+struct AdcHandler {
+    void on_complete(std::uint16_t value);
+};
+
+using Adc1 = stm32::drivers::f4::Adc1<AdcHandler>;
+```
+
+The vector symbol (`ADC_IRQHandler` / `ADC3_IRQHandler`) is defined by the
+library ISR source, not by the application.
 
 Note the delay/IRQ policies are template parameters of the hardware facade:
 
 ```cpp
-using Adc1 = stm32::drivers::f4::Adc1; // AdcDriver<F4Adc<...>>
+using Adc1 = stm32::drivers::f4::Adc1<>; // AdcDriver<F4Adc<...>, AdcNullHandler>
 ```
 
 `MyDelay` only needs `init()` and `wait_us(uint32_t)`. `MyNvic` needs
@@ -45,8 +55,19 @@ export CMSIS_WL55=/path/to/cmsis_device_wl/Include
 ./tests/compile_uart.sh
 ```
 
-It uses `drivers::wl55::Lpuart1`, the default `WlNvic` policy, a `UartConfig`
-supplied by the caller, and `static_assert`s on `brr_for()`.
+It uses `drivers::wl55::Lpuart1<Handler>` with a compile-time handler, the
+default `WlNvic` policy, a `UartConfig` supplied by the caller, and
+`static_assert`s on `brr_for()`.
+
+```cpp
+struct UartHandler {
+    static constexpr bool wants_idle = true;
+    void on_byte(std::uint8_t);
+    void on_idle();
+};
+
+using Uart1 = stm32::drivers::wl55::Lpuart1<UartHandler>;
+```
 
 The library does not vendor CMSIS. Point the script at the device headers from
 the consuming projects:

@@ -3,21 +3,33 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "stm32/drivers/uart_irq.hpp"
+
 namespace stm32::drivers {
+
+// Default handler: no application event.
+struct UartNullHandler {
+    static constexpr bool wants_idle = false;
+    void on_byte(std::uint8_t) {}
+    void on_idle() {}
+};
 
 // Type-level UART driver with interrupt-driven TX and RX ring buffers.
 //
-// HwUart is the stateless hardware facade (WlLpuart, ...). This class owns the
-// buffers, the indices and the interrupt bookkeeping. The ISR symbol is emitted
-// by the compiled driver source (src/drivers/uart_irq_<family>.cpp), which
-// calls on_irq().
+// HwUart is the stateless hardware facade (WlLpuart, ...). Handler is a
+// compile-time policy whose on_byte(byte) runs for every RX byte and whose
+// on_idle() runs on a USART IDLE event when wants_idle is true. The driver
+// owns the handler object by value: no callback pointer, no context lifetime
+// problem. The ISR symbol is emitted by the compiled driver source
+// (src/drivers/uart_irq_<family>.cpp), which calls the router.
 //
 // Single-producer/single-consumer per direction: the application writes TX
 // from thread context, the interrupt drains it; the interrupt fills RX, the
 // application reads it. Each index is written by one side only.
 template <class HwUart,
           std::size_t TxCapacity = 128,
-          std::size_t RxCapacity = TxCapacity>
+          std::size_t RxCapacity = TxCapacity,
+          class Handler = UartNullHandler>
 class UartDriver {
     static_assert(TxCapacity >= 2, "UART TX ring needs at least two slots");
     static_assert(RxCapacity >= 2, "UART RX ring needs at least two slots");
@@ -35,10 +47,13 @@ public:
         if (!HwUart::init(config)) {
             return false;
         }
+
+        UartIrqRouter<HwUart::irq()>::attach(&on_irq);
+
         if (config.receive) {
             HwUart::enable_rx_irq();
         }
-        if (idle_callback_ != nullptr) {
+        if constexpr (Handler::wants_idle) {
             HwUart::enable_idle_irq();
         }
         return true;
@@ -147,24 +162,9 @@ public:
         rx_overrun_ = false;
     }
 
-    // Optional RX hooks. They run in the UART interrupt, so keep them short
-    // and use try_write/try_write_byte for any response.
-    static void on_receive(void (*callback)(std::uint8_t)) {
-        rx_callback_ = callback;
-        if (callback != nullptr) {
-            HwUart::enable_rx_irq();
-        } else {
-            HwUart::disable_rx_irq();
-        }
-    }
-
-    static void on_idle(void (*callback)()) {
-        idle_callback_ = callback;
-        if (callback != nullptr) {
-            HwUart::enable_idle_irq();
-        } else {
-            HwUart::disable_idle_irq();
-        }
+    // The handler is owned by the driver. Its lifetime is the driver's.
+    static Handler& handler() {
+        return handler_;
     }
 
     static void set_irq_priority(std::uint32_t priority) {
@@ -186,16 +186,14 @@ public:
                 // Drop the byte but still read RDR above to clear RXNE.
                 rx_overrun_ = true;
             }
-            if (rx_callback_ != nullptr) {
-                rx_callback_(value);
-            }
+            handler_.on_byte(value);
         }
 
         if (HwUart::idle_pending()) {
             handled = true;
             HwUart::clear_idle();
-            if (idle_callback_ != nullptr) {
-                idle_callback_();
+            if constexpr (Handler::wants_idle) {
+                handler_.on_idle();
             }
         }
 
@@ -237,8 +235,7 @@ private:
     static inline volatile bool rx_overrun_ = false;
     static inline volatile std::uint8_t tx_buffer_[TxCapacity] = {};
     static inline volatile std::uint8_t rx_buffer_[RxCapacity] = {};
-    static inline void (*rx_callback_)(std::uint8_t) = nullptr;
-    static inline void (*idle_callback_)() = nullptr;
+    static inline Handler handler_{};
 };
 
 } // namespace stm32::drivers

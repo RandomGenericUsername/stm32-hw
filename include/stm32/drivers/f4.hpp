@@ -6,6 +6,7 @@
 
 namespace stm32::drivers::f4 {
 
-using Adc1 = AdcDriver<hw::F4Adc<device::f4::Adc1>>;
+template <class Handler = AdcNullHandler>
+using Adc1 = AdcDriver<hw::F4Adc<device::f4::Adc1>, Handler>;
 
 } // namespace stm32::drivers::f4

@@ -5,7 +5,13 @@
 
 #include "stm32/drivers/wl55.hpp"
 
-using Adc1 = stm32::drivers::wl55::Adc1;
+struct AdcHandler {
+    void on_complete(std::uint16_t value) {
+        (void)value;
+    }
+};
+
+using Adc1 = stm32::drivers::wl55::Adc1<AdcHandler>;
 
 // Pure conversion: VREF+ = VREF+_Charac * VREFINT_CAL / VREFINT_DATA.
 static_assert(Adc1::vrefplus_millivolts(1515u, 1515u) == 3300u,
@@ -15,14 +21,9 @@ static_assert(Adc1::vrefplus_millivolts(1515u, 1650u) == 3030u,
 static_assert(Adc1::vrefplus_millivolts(1515u, 0u) == 0u,
               "zero raw sample must not divide by zero");
 
-void on_adc_wl55(std::uint16_t value) {
-    (void)value;
-}
-
 extern "C" std::uint16_t adc_wl55_check() {
     Adc1::init();
     Adc1::enable_vrefint();
-    Adc1::on_complete(&on_adc_wl55);
     Adc1::set_irq_priority(15);
     Adc1::start<0>(Adc1::SampleTime::Cycles12_5);
 

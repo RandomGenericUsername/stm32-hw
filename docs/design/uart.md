@@ -96,7 +96,10 @@ board fact and is supplied explicitly when selected.
 Driver:
 
 ```cpp
-template <class HwUart, std::size_t Capacity = 128>
+template <class HwUart,
+          std::size_t TxCapacity = 128,
+          std::size_t RxCapacity = TxCapacity,
+          class Handler = UartNullHandler>
 class UartDriver {
     static bool init(const typename HwUart::Config&);
     static void write(const char*);
@@ -107,24 +110,39 @@ class UartDriver {
     static void flush();                  // waits for TC
     static bool empty();
     static std::size_t pending();
-    static bool read(std::uint8_t&);      // non-blocking RX read
+    static bool read(std::uint8_t&);      // optional non-blocking RX read
     static bool rx_empty();
     static std::size_t rx_pending();
     static bool rx_overrun();
     static void clear_rx_overrun();
-    static void on_receive(void (*)(std::uint8_t)); // per-byte ISR callback
-    static void on_idle(void (*)());                // IDLE-line callback
+    static Handler& handler();            // driver-owned instance
     static bool on_irq();                 // RXNE, IDLE and TXE
 };
 ```
 
-`drivers::wl55::Lpuart1` is `UartDriver<hw::WlLpuart<device::wl55::Lpuart1>>`.
+`Handler` is a compile-time policy object with:
+
+```cpp
+static constexpr bool wants_idle;
+void on_byte(std::uint8_t);
+void on_idle();
+```
+
+The driver owns one `Handler` instance by value. There is no callback
+pointer, no `void*` and no external handler lifetime.
+
+`drivers::wl55::Lpuart1<Handler>` is:
+
+```cpp
+UartDriver<hw::WlLpuart<device::wl55::Lpuart1>, 128, 128, Handler>
+```
 
 ## Interrupt ownership
 
 `src/drivers/uart_irq_wl55.cpp` defines `LPUART1_IRQHandler` and calls
-`drivers::wl55::Lpuart1::on_irq()`. The application never defines the vector
-and never touches TXE or RXNE. This mirrors the ADC split.
+`UartIrqRouter<LPUART1_IRQn>::dispatch()`. Each driver attaches its static
+`on_irq` in `init()`. The application never defines the vector and never touches
+TXE or RXNE. This mirrors the ADC router split.
 
 TX and RX each have their own single-producer/single-consumer ring:
 
@@ -140,16 +158,35 @@ The ISR handles RXNE, IDLE and TXE in one entry. If the RX ring is full, it
 still reads `RDR` to clear RXNE and sets `rx_overrun_`; the byte is dropped.
 The application can poll `rx_overrun()`/`clear_rx_overrun()`.
 
-Two optional callbacks remove the need to poll for RX:
+RX events are delivered to the compile-time handler:
 
 ```text
-on_receive(byte)   called for every received byte, in the UART ISR
-on_idle()          called on USART IDLE, i.e. a frame/message boundary
+Handler::on_byte(byte)   every received byte, in the UART ISR
+Handler::on_idle()       USART IDLE, i.e. a frame/message boundary
 ```
 
-The callbacks run in interrupt context. Use `try_write`/`try_write_byte` for
+The handler runs in interrupt context. Use `try_write`/`try_write_byte` for
 any response so the ISR never blocks. The RX ring remains available for
 applications that prefer `read()`.
+
+Example handler:
+
+```cpp
+struct VcpHandler {
+    static constexpr bool wants_idle = true;
+    char line[64];
+    std::uint32_t length = 0;
+
+    void on_byte(std::uint8_t byte);
+    void on_idle() { /* flush line */ }
+};
+
+using Vcp = stm32::drivers::wl55::Lpuart1<VcpHandler>;
+```
+
+The handler object is owned by `UartDriver<...>::handler_`, so it lives as long
+as the driver. A handler member can still point at external state; that state's
+lifetime remains the application's responsibility.
 
 ## BRR
 
@@ -174,10 +211,12 @@ At PCLK1 = 16 MHz and 115200 baud: `BRR = 35556 (0x8AE4)`.
 - `static_assert` covers `brr_for(16 MHz, 115200) == 35556`,
   `brr_for(32 MHz, 115200) == 71111`, `brr_for(LSE, 9600) == 874` and the
   zero-baud guard.
-- `wl55jc` `mu build`: M4 5168 text / 16 data / 396 bss
+- `wl55jc` `mu build`: M4 4040 text / 16 data / 400 bss
   (128-byte TX ring + 128-byte RX ring + 64-byte line buffer + driver state).
-- Live loopback through the RX callback: sending `callback test\r\n` echoed
-  the same text; the main loop does not poll the UART.
+- The compile-time handler build removes the callback pointers and registration
+  code (text dropped from 5168 to 4040).
+- Live loopback was captured with the previous callback-pointer build; the
+  handler-policy build still needs a hardware flash when a probe is attached.
 - PA3 is configured as `LPUART1_RX` in AF8; `RE`, `RXNEIE` and `IDLEIE` are
   enabled when callbacks are registered.
 - `LPUART1_IRQHandler` strong at `0x08000a14`; vector IRQ 38 at

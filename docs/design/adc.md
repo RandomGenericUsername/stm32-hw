@@ -133,7 +133,7 @@ include/stm32/device/f4/adc.hpp       # Adc1 descriptor
 include/stm32/device/h7/adc.hpp       # Adc1/2/3 descriptors
 include/stm32/device/wl55/adc.hpp     # Adc1 descriptor
 
-include/stm32/drivers/adc.hpp         # AdcDriver<HwAdc> (state + callback)
+include/stm32/drivers/adc.hpp         # AdcDriver<HwAdc, Handler> (state + policy)
 include/stm32/drivers/adc_irq.hpp     # AdcIrqRouter<Irq> (shared vectors)
 include/stm32/drivers/f4.hpp          # drivers::f4::Adc1
 include/stm32/drivers/h7.hpp          # drivers::h7::Adc1/2/3
@@ -155,11 +155,12 @@ The ADC family implementation sets the divider that lives in the ADC block
 
 ## Driver layer
 
-`AdcDriver<HwAdc>` is a type-level, stateful driver. `HwAdc` is the stateless
-family facade.
+`AdcDriver<HwAdc, Handler>` is a type-level, stateful driver. `HwAdc` is the
+stateless family facade. `Handler` is a compile-time policy with
+`void on_complete(std::uint16_t)`, called in the ADC interrupt.
 
 ```cpp
-template <class HwAdc>
+template <class HwAdc, class Handler = AdcNullHandler>
 class AdcDriver {
 public:
     using SampleTime = typename HwAdc::SampleTime;
@@ -175,7 +176,7 @@ public:
     static std::uint16_t take();
 
     static void set_irq_priority(std::uint32_t priority);
-    static void on_complete(void (*callback)(std::uint16_t));
+    static Handler& handler();
 
 private:
     static bool on_irq();   // called by the library ISR/router
@@ -183,16 +184,18 @@ private:
     static inline volatile bool busy_ = false;
     static inline volatile bool ready_ = false;
     static inline volatile std::uint16_t value_ = 0;
-    static inline void (*callback_)(std::uint16_t) = nullptr;
+    static inline Handler handler_{};
 };
 ```
 
 The driver owns:
 
 - conversion state (`busy_`, `ready_`, `value_`)
-- the optional completion callback
+- the handler object by value
 - the EOC/DR/IRQ handling
 - registration with the IRQ router
+
+There is no callback pointer and no external handler lifetime.
 
 The application never defines `ADC_IRQHandler`.
 
@@ -243,15 +246,18 @@ no virtual, no user registration.
 
 using Adc1 = stm32::drivers::wl55::Adc1;
 
-void on_adc(std::uint16_t value) {
-    // optional semantic hook; runs in the ADC interrupt
-    (void)value;
-}
+struct AdcHandler {
+    void on_complete(std::uint16_t value) {
+        // runs in the ADC interrupt
+        (void)value;
+    }
+};
+
+using Adc1 = stm32::drivers::wl55::Adc1<AdcHandler>;
 
 Adc1::init();
 Adc1::enable_vrefint();       // WL55 internal channel VIN[13]
 Adc1::set_irq_priority(5);
-Adc1::on_complete(&on_adc);
 
 for (;;) {
     Adc1::start<13>(Adc1::SampleTime::Cycles160_5);
@@ -267,7 +273,8 @@ for (;;) {
 ```
 
 No user ISR, no sampler object, no state struct, no globals. The driver owns the
-state. The callback is optional; `ready()`/`take()` are sufficient without it.
+state and the handler. With `AdcNullHandler`, `ready()`/`take()` remain
+sufficient; the handler is a compile-time policy, not a runtime callback.
 
 For an external channel, the app also configures the pin as analog:
 
@@ -290,7 +297,7 @@ ADC EOC
     -> AdcIrqRouter<IRQ>::dispatch()
       -> AdcDriver<HwAdc>::on_irq()
         -> read DR / clear EOC / busy=false / ready=true
-        -> optional callback(value)
+        -> Handler::on_complete(value)
 ```
 
 F4 ADC1/2/3 and H7 ADC1/2 share a vector; each registered driver checks its own
@@ -304,7 +311,7 @@ In scope:
 - one channel, one conversion, software trigger;
 - interrupt-driven completion (`EOC`) owned by the driver;
 - driver-owned state: `busy`, `ready`, `value`;
-- optional `void(std::uint16_t)` completion callback;
+- compile-time `Handler::on_complete(std::uint16_t)` policy, driver-owned;
 - library-owned ISR with a fixed-size router for shared vectors;
 - fixed 12-bit right-aligned on all three (no resolution argument yet;
   H7 16/14-bit is deferred);

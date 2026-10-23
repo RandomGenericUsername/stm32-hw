@@ -21,10 +21,10 @@ It is deliberately about **who owns what**, not about a specific application.
 ```text
 app
   Board wiring, pin configuration, clock profile selection,
-  main loop, application policy, optional callbacks.
+  main loop, application policy, optional event handlers.
 
 drivers
-  Stateful peripheral behavior: state machines, buffers, callbacks,
+  Stateful peripheral behavior: state machines, buffers, event handlers,
   lifecycle, ISR ownership.
 
 hw
@@ -90,7 +90,7 @@ board
 | `RCC_CCIPR.ADCSEL` | `hw::WlClock<Traits>` |
 | ADC `CKMODE` / `PRESC` | `hw::WlAdc` |
 | ADC clock facts and 35 MHz limit | `device::wl55::AdcClockTraits` |
-| ADC state / callback | `drivers::AdcDriver` |
+| ADC state / handler | `drivers::AdcDriver` |
 | ADC ISR | `src/drivers/adc_irq_wl55.cpp` |
 | `RCC_CCIPR.LPUART1SEL` | `hw::WlLpuart` via `hw::WlClock` |
 | UART BRR / 8N1 TX | `hw::WlLpuart` |
@@ -156,14 +156,14 @@ ADC:
     ADC_IRQHandler
       -> AdcIrqRouter<IRQ>::dispatch()
         -> AdcDriver::on_irq()
-          -> optional callback
+          -> Handler::on_complete(value)
 
 UART:
     LPUART1_IRQHandler
       -> UartDriver::on_irq()
         -> RXNE: read RDR into the RX ring (or drop + overrun flag)
-                 and call the optional per-byte callback
-        -> IDLE: clear IDLE and call the optional message-boundary callback
+                 and call Handler::on_byte(value)
+        -> IDLE: clear IDLE and call Handler::on_idle()
         -> TXE:  write the next TX ring byte
 ```
 
@@ -181,7 +181,7 @@ The consuming project adds them through `config/sources.mk`.
 `AdcDriver` owns:
 
 ```text
-busy_, ready_, value_, callback_
+busy_, ready_, value_, handler_
 ```
 
 `UartDriver` owns:
@@ -190,8 +190,7 @@ busy_, ready_, value_, callback_
 TX ring buffer + indices
 RX ring buffer + indices
 RX overrun flag
-optional per-byte RX callback
-optional IDLE-line callback
+compile-time Handler (on_byte, on_idle)
 ```
 
 Both are type-level singletons, matching the one-physical-peripheral model.
@@ -207,7 +206,7 @@ The app owns:
 - ADC channel and sampling time
 - what to print or do with samples
 - IRQ priorities
-- optional callbacks
+- optional compile-time event handlers
 
 The app does not own:
 
@@ -248,7 +247,7 @@ EXTRA_INC_M4  = -Ithird_party/stm32-hw/include
 
 - F4/H7 `ClockTraits` and family clock implementations.
 - H7 D1/D2/D3 clock-domain configuration.
-- UART command/protocol parser on top of the byte/idle callbacks.
+- UART command/protocol parser on top of Handler::on_byte/on_idle.
 - USART1/USART2 descriptors and gates.
 - Runtime clock switching / DVFS.
 - MCO/LSCO configuration.

@@ -6,13 +6,19 @@
 
 namespace stm32::drivers {
 
+// Default handler: no application event.
+struct AdcNullHandler {
+    void on_complete(std::uint16_t) {}
+};
+
 // Type-level ADC driver.
 //
-// HwAdc is the stateless hardware facade (F4Adc / H7Adc / WlAdc). This class
-// owns the conversion state, the completion callback and the interrupt
-// bookkeeping. The ISR symbol is emitted by the compiled driver source
-// (src/drivers/adc_irq_<family>.cpp), which calls the router.
-template <class HwAdc>
+// HwAdc is the stateless hardware facade (F4Adc / H7Adc / WlAdc). Handler is
+// a compile-time policy whose on_complete(value) runs in the ADC interrupt.
+// The driver owns the handler object by value; there is no callback pointer
+// and no context lifetime problem. The ISR symbol is emitted by the compiled
+// driver source (src/drivers/adc_irq_<family>.cpp), which calls the router.
+template <class HwAdc, class Handler = AdcNullHandler>
 class AdcDriver {
 public:
     using SampleTime = typename HwAdc::SampleTime;
@@ -60,9 +66,9 @@ public:
         HwAdc::set_irq_priority(priority);
     }
 
-    // Optional semantic hook; runs in the ADC interrupt.
-    static void on_complete(void (*callback)(std::uint16_t)) {
-        callback_ = callback;
+    // The handler is owned by the driver. Its lifetime is the driver's.
+    static Handler& handler() {
+        return handler_;
     }
 
 private:
@@ -73,16 +79,14 @@ private:
         value_ = HwAdc::read_result();
         ready_ = true;
         busy_ = false;
-        if (callback_ != nullptr) {
-            callback_(value_);
-        }
+        handler_.on_complete(value_);
         return true;
     }
 
     static inline volatile bool busy_ = false;
     static inline volatile bool ready_ = false;
     static inline volatile std::uint16_t value_ = 0;
-    static inline void (*callback_)(std::uint16_t) = nullptr;
+    static inline Handler handler_{};
 };
 
 } // namespace stm32::drivers

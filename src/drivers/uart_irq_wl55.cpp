@@ -1,8 +1,8 @@
 // WL55 LPUART1 interrupt ownership. Compiled into the driver layer.
 #include <stm32wl55xx.h>
 
-#include "stm32/drivers/wl55.hpp"
+#include "stm32/drivers/uart_irq.hpp"
 
 extern "C" void LPUART1_IRQHandler(void) {
-    (void)stm32::drivers::wl55::Lpuart1::on_irq();
+    stm32::drivers::UartIrqRouter<LPUART1_IRQn>::dispatch();
 }

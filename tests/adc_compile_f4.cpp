@@ -5,15 +5,16 @@
 
 #include "stm32/drivers/f4.hpp"
 
-using Adc1 = stm32::drivers::f4::Adc1;
+struct AdcHandler {
+    void on_complete(std::uint16_t value) {
+        (void)value;
+    }
+};
 
-void on_adc_f4(std::uint16_t value) {
-    (void)value;
-}
+using Adc1 = stm32::drivers::f4::Adc1<AdcHandler>;
 
 extern "C" std::uint16_t adc_f4_check() {
     Adc1::init();
-    Adc1::on_complete(&on_adc_f4);
     Adc1::set_irq_priority(15);
     Adc1::start<0>(Adc1::SampleTime::Cycles56);
     return Adc1::ready() ? Adc1::take() : 0u;
