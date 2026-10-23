@@ -27,11 +27,21 @@ constexpr auto config = UartConfig::from_system(
 static_assert(config.kernel_hz == 16000000u);
 static_assert(config.receive);
 
+void on_rx_byte(std::uint8_t value) {
+    (void)Uart1::try_write_byte(value);
+}
+
+void on_rx_idle() {
+    (void)Uart1::try_write("idle\n");
+}
+
 extern "C" std::uint32_t uart_wl55_check() {
     if (!Uart1::init(config)) {
         return 1u;
     }
     Uart1::set_irq_priority(6u);
+    Uart1::on_receive(&on_rx_byte);
+    Uart1::on_idle(&on_rx_idle);
     Uart1::write("stm32-hw uart check\n");
     Uart1::write_byte(static_cast<std::uint8_t>('!'));
     Uart1::flush();

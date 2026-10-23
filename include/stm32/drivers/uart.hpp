@@ -38,6 +38,9 @@ public:
         if (config.receive) {
             HwUart::enable_rx_irq();
         }
+        if (idle_callback_ != nullptr) {
+            HwUart::enable_idle_irq();
+        }
         return true;
     }
 
@@ -62,13 +65,40 @@ public:
         }
     }
 
-    // Blocks while the TX ring is full, so no byte is dropped.
-    static void write_byte(std::uint8_t value) {
-        while (tx_full()) {
+    // Non-blocking TX helpers, safe to call from an ISR or callback.
+    static bool try_write(const char* text) {
+        while (*text != '\0') {
+            if (!try_write_byte(static_cast<std::uint8_t>(*text))) {
+                return false;
+            }
+            ++text;
+        }
+        return true;
+    }
+
+    static bool try_write(const std::uint8_t* data, std::size_t size) {
+        for (std::size_t i = 0; i < size; ++i) {
+            if (!try_write_byte(data[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static bool try_write_byte(std::uint8_t value) {
+        if (tx_full()) {
+            return false;
         }
         tx_buffer_[tx_head_] = value;
         tx_head_ = next(tx_head_, TxCapacity);
         HwUart::enable_tx_irq();
+        return true;
+    }
+
+    // Blocks while the TX ring is full, so no byte is dropped.
+    static void write_byte(std::uint8_t value) {
+        while (!try_write_byte(value)) {
+        }
     }
 
     // Wait until every queued TX byte has left the shift register.
@@ -117,6 +147,26 @@ public:
         rx_overrun_ = false;
     }
 
+    // Optional RX hooks. They run in the UART interrupt, so keep them short
+    // and use try_write/try_write_byte for any response.
+    static void on_receive(void (*callback)(std::uint8_t)) {
+        rx_callback_ = callback;
+        if (callback != nullptr) {
+            HwUart::enable_rx_irq();
+        } else {
+            HwUart::disable_rx_irq();
+        }
+    }
+
+    static void on_idle(void (*callback)()) {
+        idle_callback_ = callback;
+        if (callback != nullptr) {
+            HwUart::enable_idle_irq();
+        } else {
+            HwUart::disable_idle_irq();
+        }
+    }
+
     static void set_irq_priority(std::uint32_t priority) {
         HwUart::set_irq_priority(priority);
     }
@@ -135,6 +185,17 @@ public:
             } else {
                 // Drop the byte but still read RDR above to clear RXNE.
                 rx_overrun_ = true;
+            }
+            if (rx_callback_ != nullptr) {
+                rx_callback_(value);
+            }
+        }
+
+        if (HwUart::idle_pending()) {
+            handled = true;
+            HwUart::clear_idle();
+            if (idle_callback_ != nullptr) {
+                idle_callback_();
             }
         }
 
@@ -176,6 +237,8 @@ private:
     static inline volatile bool rx_overrun_ = false;
     static inline volatile std::uint8_t tx_buffer_[TxCapacity] = {};
     static inline volatile std::uint8_t rx_buffer_[RxCapacity] = {};
+    static inline void (*rx_callback_)(std::uint8_t) = nullptr;
+    static inline void (*idle_callback_)() = nullptr;
 };
 
 } // namespace stm32::drivers

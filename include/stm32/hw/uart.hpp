@@ -23,6 +23,10 @@ namespace stm32::hw {
 //   static void enable_rx_irq();
 //   static void disable_rx_irq();
 //   static bool rx_irq_pending();
+//   static bool idle_pending();
+//   static void clear_idle();
+//   static void enable_idle_irq();
+//   static void disable_idle_irq();
 //   static void set_irq_priority(std::uint32_t);
 //   static constexpr auto irq();
 //
@@ -87,6 +91,22 @@ public:
 
     static bool rx_irq_pending() {
         return Impl::rx_irq_pending();
+    }
+
+    static bool idle_pending() {
+        return Impl::idle_pending();
+    }
+
+    static void clear_idle() {
+        Impl::clear_idle();
+    }
+
+    static void enable_idle_irq() {
+        Impl::enable_idle_irq();
+    }
+
+    static void disable_idle_irq() {
+        Impl::disable_idle_irq();
     }
 
     static void set_irq_priority(std::uint32_t priority) {

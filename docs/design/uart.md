@@ -102,6 +102,8 @@ class UartDriver {
     static void write(const char*);
     static void write(const std::uint8_t*, std::size_t);
     static void write_byte(std::uint8_t); // blocks while the TX ring is full
+    static bool try_write_byte(std::uint8_t); // non-blocking, ISR-safe
+    static bool try_write(const char*);       // non-blocking, ISR-safe
     static void flush();                  // waits for TC
     static bool empty();
     static std::size_t pending();
@@ -110,7 +112,9 @@ class UartDriver {
     static std::size_t rx_pending();
     static bool rx_overrun();
     static void clear_rx_overrun();
-    static bool on_irq();                 // TXE and RXNE
+    static void on_receive(void (*)(std::uint8_t)); // per-byte ISR callback
+    static void on_idle(void (*)());                // IDLE-line callback
+    static bool on_irq();                 // RXNE, IDLE and TXE
 };
 ```
 
@@ -132,9 +136,20 @@ RX: interrupt writes head_, application reads tail_
 Both are `volatile`; no lock is needed on a single core. Capacity includes one
 sentinel slot, so 128 slots hold 127 bytes per direction.
 
-The ISR handles RXNE and TXE in one entry. If the RX ring is full, it still
-reads `RDR` to clear RXNE and sets `rx_overrun_`; the byte is dropped. The
-application can poll `rx_overrun()`/`clear_rx_overrun()`.
+The ISR handles RXNE, IDLE and TXE in one entry. If the RX ring is full, it
+still reads `RDR` to clear RXNE and sets `rx_overrun_`; the byte is dropped.
+The application can poll `rx_overrun()`/`clear_rx_overrun()`.
+
+Two optional callbacks remove the need to poll for RX:
+
+```text
+on_receive(byte)   called for every received byte, in the UART ISR
+on_idle()          called on USART IDLE, i.e. a frame/message boundary
+```
+
+The callbacks run in interrupt context. Use `try_write`/`try_write_byte` for
+any response so the ISR never blocks. The RX ring remains available for
+applications that prefer `read()`.
 
 ## BRR
 
@@ -159,10 +174,12 @@ At PCLK1 = 16 MHz and 115200 baud: `BRR = 35556 (0x8AE4)`.
 - `static_assert` covers `brr_for(16 MHz, 115200) == 35556`,
   `brr_for(32 MHz, 115200) == 71111`, `brr_for(LSE, 9600) == 874` and the
   zero-baud guard.
-- `wl55jc` `mu build`: M4 4972 text / 16 data / 320 bss
-  (128-byte TX ring + 128-byte RX ring + driver state).
-- Live loopback: sending `hello uart rx\r\n` to the VCP echoed the same text.
-- PA3 is configured as `LPUART1_RX` in AF8; `RE` and `RXNEIE` are enabled.
+- `wl55jc` `mu build`: M4 5168 text / 16 data / 396 bss
+  (128-byte TX ring + 128-byte RX ring + 64-byte line buffer + driver state).
+- Live loopback through the RX callback: sending `callback test\r\n` echoed
+  the same text; the main loop does not poll the UART.
+- PA3 is configured as `LPUART1_RX` in AF8; `RE`, `RXNEIE` and `IDLEIE` are
+  enabled when callbacks are registered.
 - `LPUART1_IRQHandler` strong at `0x08000a14`; vector IRQ 38 at
   `0x080000d8` = `0x08000a15`.
 - `main` disassembly: APB1ENR2 bit 0 set, `CCIPR[11:10] = 00` (PCLK1),
@@ -171,7 +188,7 @@ At PCLK1 = 16 MHz and 115200 baud: `BRR = 35556 (0x8AE4)`.
 
 ## Not in this slice
 
-- RX callbacks / command parsing (polling `read()` is implemented).
+- Command/protocol parsing on top of the byte/idle callbacks.
 - USART1 / USART2 instances and their gates.
 - DMA, flow control, parity, word lengths other than 8N1.
 - Error interrupts (ORE/FE/NE); RX overrun at the ring level is tracked, but

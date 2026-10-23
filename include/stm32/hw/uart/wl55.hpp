@@ -69,7 +69,8 @@ public:
         Irq::disable(Desc::irq());
         auto* uart = Desc::regs();
         uart->CR1 &= ~(USART_CR1_TXEIE_TXFNFIE | USART_CR1_RXNEIE_RXFNEIE
-                       | USART_CR1_TE | USART_CR1_RE | USART_CR1_UE);
+                       | USART_CR1_IDLEIE | USART_CR1_TE | USART_CR1_RE
+                       | USART_CR1_UE);
     }
 
     static void write_byte(std::uint8_t value) {
@@ -116,6 +117,23 @@ public:
 
     static bool rx_irq_pending() {
         return rx_ready();
+    }
+
+    static bool idle_pending() {
+        return (Desc::regs()->ISR & USART_ISR_IDLE) != 0u;
+    }
+
+    static void clear_idle() {
+        Desc::regs()->ICR = USART_ICR_IDLECF;
+    }
+
+    static void enable_idle_irq() {
+        Desc::regs()->CR1 |= USART_CR1_IDLEIE;
+        Irq::enable(Desc::irq());
+    }
+
+    static void disable_idle_irq() {
+        Desc::regs()->CR1 &= ~USART_CR1_IDLEIE;
     }
 
     static void set_irq_priority(std::uint32_t priority) {

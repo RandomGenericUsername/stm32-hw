@@ -162,6 +162,8 @@ UART:
     LPUART1_IRQHandler
       -> UartDriver::on_irq()
         -> RXNE: read RDR into the RX ring (or drop + overrun flag)
+                 and call the optional per-byte callback
+        -> IDLE: clear IDLE and call the optional message-boundary callback
         -> TXE:  write the next TX ring byte
 ```
 
@@ -188,6 +190,8 @@ busy_, ready_, value_, callback_
 TX ring buffer + indices
 RX ring buffer + indices
 RX overrun flag
+optional per-byte RX callback
+optional IDLE-line callback
 ```
 
 Both are type-level singletons, matching the one-physical-peripheral model.
@@ -244,7 +248,7 @@ EXTRA_INC_M4  = -Ithird_party/stm32-hw/include
 
 - F4/H7 `ClockTraits` and family clock implementations.
 - H7 D1/D2/D3 clock-domain configuration.
-- UART RX callbacks / command parser (polling `read()` is implemented).
+- UART command/protocol parser on top of the byte/idle callbacks.
 - USART1/USART2 descriptors and gates.
 - Runtime clock switching / DVFS.
 - MCO/LSCO configuration.
