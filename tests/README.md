@@ -29,6 +29,10 @@ struct AdcHandler {
 using Adc1 = stm32::drivers::f4::Adc1<AdcHandler>;
 ```
 
+The handler is constrained by `drivers::AdcHandler`. Each test also
+`static_assert`s the positive contract and rejects a type with no
+`on_complete`.
+
 The vector symbol (`ADC_IRQHandler` / `ADC3_IRQHandler`) is defined by the
 library ISR source, not by the application.
 
@@ -68,6 +72,10 @@ struct UartHandler {
 
 using Uart1 = stm32::drivers::wl55::Lpuart1<UartHandler>;
 ```
+
+`drivers::UartHandler` requires `wants_idle` and `on_byte`; it requires
+`on_idle` only when `wants_idle` is true. The test also checks a missing
+IDLE hook is rejected and a non-IDLE handler without `on_idle` is accepted.
 
 The library does not vendor CMSIS. Point the script at the device headers from
 the consuming projects:

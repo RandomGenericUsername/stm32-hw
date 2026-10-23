@@ -13,6 +13,12 @@ struct AdcHandler {
 
 using Adc1 = stm32::drivers::wl55::Adc1<AdcHandler>;
 
+static_assert(stm32::drivers::AdcHandler<AdcHandler>);
+static_assert(stm32::drivers::AdcHandler<stm32::drivers::AdcNullHandler>);
+
+struct NotAnAdcHandler {};
+static_assert(!stm32::drivers::AdcHandler<NotAnAdcHandler>);
+
 // Pure conversion: VREF+ = VREF+_Charac * VREFINT_CAL / VREFINT_DATA.
 static_assert(Adc1::vrefplus_millivolts(1515u, 1515u) == 3300u,
               "calibration sample must map back to 3.3 V");

@@ -156,11 +156,18 @@ The ADC family implementation sets the divider that lives in the ADC block
 ## Driver layer
 
 `AdcDriver<HwAdc, Handler>` is a type-level, stateful driver. `HwAdc` is the
-stateless family facade. `Handler` is a compile-time policy with
-`void on_complete(std::uint16_t)`, called in the ADC interrupt.
+stateless family facade. `Handler` is a C++20 concept-constrained, compile-time
+policy with `void on_complete(std::uint16_t)`, called in the ADC interrupt.
 
 ```cpp
-template <class HwAdc, class Handler = AdcNullHandler>
+template <class H>
+concept AdcHandler =
+    std::default_initializable<H> &&
+    requires(H& handler, std::uint16_t value) {
+        { handler.on_complete(value) } -> std::same_as<void>;
+    };
+
+template <class HwAdc, AdcHandler Handler = AdcNullHandler>
 class AdcDriver {
 public:
     using SampleTime = typename HwAdc::SampleTime;
@@ -311,7 +318,8 @@ In scope:
 - one channel, one conversion, software trigger;
 - interrupt-driven completion (`EOC`) owned by the driver;
 - driver-owned state: `busy`, `ready`, `value`;
-- compile-time `Handler::on_complete(std::uint16_t)` policy, driver-owned;
+- C++20 `AdcHandler` policy (`Handler::on_complete(std::uint16_t)`),
+  driver-owned;
 - library-owned ISR with a fixed-size router for shared vectors;
 - fixed 12-bit right-aligned on all three (no resolution argument yet;
   H7 16/14-bit is deferred);

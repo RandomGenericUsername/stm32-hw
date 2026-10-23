@@ -96,10 +96,26 @@ board fact and is supplied explicitly when selected.
 Driver:
 
 ```cpp
+template <class H>
+concept UartIdleHandler = requires(H& handler) {
+    { handler.on_idle() } -> std::same_as<void>;
+};
+
+template <class H>
+concept UartHandler =
+    std::default_initializable<H> &&
+    requires {
+        { H::wants_idle } -> std::convertible_to<bool>;
+    } &&
+    requires(H& handler, std::uint8_t byte) {
+        { handler.on_byte(byte) } -> std::same_as<void>;
+    } &&
+    (!H::wants_idle || UartIdleHandler<H>);
+
 template <class HwUart,
           std::size_t TxCapacity = 128,
           std::size_t RxCapacity = TxCapacity,
-          class Handler = UartNullHandler>
+          UartHandler Handler = UartNullHandler>
 class UartDriver {
     static bool init(const typename HwUart::Config&);
     static void write(const char*);
@@ -120,16 +136,19 @@ class UartDriver {
 };
 ```
 
-`Handler` is a compile-time policy object with:
+`Handler` must satisfy the C++20 `UartHandler` concept. It must be
+default-constructible and provide:
 
 ```cpp
 static constexpr bool wants_idle;
 void on_byte(std::uint8_t);
-void on_idle();
+void on_idle(); // required only when wants_idle is true
 ```
 
 The driver owns one `Handler` instance by value. There is no callback
-pointer, no `void*` and no external handler lifetime.
+pointer, no `void*` and no external handler lifetime. A handler with
+`wants_idle = false` may omit `on_idle`; the concept checks this condition at
+compile time.
 
 `drivers::wl55::Lpuart1<Handler>` is:
 
@@ -218,7 +237,7 @@ At PCLK1 = 16 MHz and 115200 baud: `BRR = 35556 (0x8AE4)`.
 - Live loopback was captured with the previous callback-pointer build; the
   handler-policy build still needs a hardware flash when a probe is attached.
 - PA3 is configured as `LPUART1_RX` in AF8; `RE`, `RXNEIE` and `IDLEIE` are
-  enabled when callbacks are registered.
+  enabled by the handler policy (`wants_idle` controls IDLEIE).
 - `LPUART1_IRQHandler` strong at `0x08000a14`; vector IRQ 38 at
   `0x080000d8` = `0x08000a15`.
 - `main` disassembly: APB1ENR2 bit 0 set, `CCIPR[11:10] = 00` (PCLK1),
@@ -227,7 +246,7 @@ At PCLK1 = 16 MHz and 115200 baud: `BRR = 35556 (0x8AE4)`.
 
 ## Not in this slice
 
-- Command/protocol parsing on top of the byte/idle callbacks.
+- Command/protocol parsing on top of `Handler::on_byte`/`Handler::on_idle`.
 - USART1 / USART2 instances and their gates.
 - DMA, flow control, parity, word lengths other than 8N1.
 - Error interrupts (ORE/FE/NE); RX overrun at the ring level is tracked, but

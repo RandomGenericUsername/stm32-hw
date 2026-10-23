@@ -13,6 +13,12 @@ struct AdcHandler {
 
 using Adc1 = stm32::drivers::f4::Adc1<AdcHandler>;
 
+static_assert(stm32::drivers::AdcHandler<AdcHandler>);
+static_assert(stm32::drivers::AdcHandler<stm32::drivers::AdcNullHandler>);
+
+struct NotAnAdcHandler {};
+static_assert(!stm32::drivers::AdcHandler<NotAnAdcHandler>);
+
 extern "C" std::uint16_t adc_f4_check() {
     Adc1::init();
     Adc1::set_irq_priority(15);

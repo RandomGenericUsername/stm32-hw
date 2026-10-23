@@ -11,7 +11,7 @@
 
 namespace stm32::drivers::wl55 {
 
-template <class Handler = AdcNullHandler>
+template <AdcHandler Handler = AdcNullHandler>
 class Adc1 final
     : public AdcDriver<hw::WlAdc<device::wl55::Adc1>, Handler> {
 public:
@@ -45,7 +45,7 @@ public:
     }
 };
 
-template <class Handler = UartNullHandler>
+template <UartHandler Handler = UartNullHandler>
 class Lpuart1 final
     : public UartDriver<
           hw::WlLpuart<device::wl55::Lpuart1>, 128, 128, Handler> {};

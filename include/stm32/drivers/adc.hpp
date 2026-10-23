@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <cstdint>
 
 #include "stm32/drivers/adc_irq.hpp"
@@ -11,6 +12,15 @@ struct AdcNullHandler {
     void on_complete(std::uint16_t) {}
 };
 
+// Handler contract for AdcDriver. The driver owns one Handler instance and
+// calls on_complete(value) from the ADC interrupt.
+template <class H>
+concept AdcHandler =
+    std::default_initializable<H> &&
+    requires(H& handler, std::uint16_t value) {
+        { handler.on_complete(value) } -> std::same_as<void>;
+    };
+
 // Type-level ADC driver.
 //
 // HwAdc is the stateless hardware facade (F4Adc / H7Adc / WlAdc). Handler is
@@ -18,7 +28,7 @@ struct AdcNullHandler {
 // The driver owns the handler object by value; there is no callback pointer
 // and no context lifetime problem. The ISR symbol is emitted by the compiled
 // driver source (src/drivers/adc_irq_<family>.cpp), which calls the router.
-template <class HwAdc, class Handler = AdcNullHandler>
+template <class HwAdc, AdcHandler Handler = AdcNullHandler>
 class AdcDriver {
 public:
     using SampleTime = typename HwAdc::SampleTime;

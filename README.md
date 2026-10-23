@@ -18,7 +18,7 @@ sources later; the first slice is header-only.
 - `hw::` types are **type-level singletons**: static methods, deleted
   constructors, no state. The hardware peripheral is the singleton.
 - `drivers::` types are **stateful objects**: configuration, state machines,
-  buffers, callbacks, ownership.
+  buffers, event handlers, ownership.
 - Clock/RCC logic lives only in the clock implementation (`hw::WlClock`).
 - GPIO register layout lives only in the port/layout types
   (`hw::Port`, `hw::ModernLayout`).
@@ -139,11 +139,12 @@ First vertical slice:
 - ADC: `hw::Adc`, `F4Adc` / `H7Adc` / `WlAdc`; device descriptors
   `device::f4::Adc1`, `device::h7::Adc1/2/3`, `device::wl55::Adc1`;
   stateful `drivers::AdcDriver` + family aliases, library-owned ISR/router,
-  optional callback, injected `Delay`/`Irq` policies
+  compile-time `AdcHandler` concept policy, injected `Delay`/`Irq` policies
 - WL55 VREFINT factory calibration (system memory) and calibrated
   `VREF+` conversion in millivolts (`drivers::wl55::Adc1`)
 - UART: WL55 LPUART TX/RX (`hw::WlLpuart`, `drivers::UartDriver`),
-  ring buffers, library-owned `LPUART1_IRQHandler`
+  ring buffers, `UartHandler` concept policy, library-owned
+  `LPUART1_IRQHandler`
 - UART compile check: `tests/uart_compile_wl55.cpp` + `compile_uart.sh`
 - Compile check: `tests/compile_check.cpp`
 - ADC compile checks: `tests/adc_compile_f4.cpp`, `adc_compile_h7.cpp`,

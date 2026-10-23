@@ -18,6 +18,24 @@ struct UartHandler {
 
 using Uart1 = stm32::drivers::wl55::Lpuart1<UartHandler>;
 using HwUart = stm32::hw::WlLpuart<stm32::device::wl55::Lpuart1>;
+
+static_assert(stm32::drivers::UartHandler<UartHandler>);
+static_assert(stm32::drivers::UartHandler<stm32::drivers::UartNullHandler>);
+
+struct IdleWithoutHook {
+    static constexpr bool wants_idle = true;
+    void on_byte(std::uint8_t) {}
+};
+static_assert(!stm32::drivers::UartHandler<IdleWithoutHook>);
+
+struct NoIdleWithoutHook {
+    static constexpr bool wants_idle = false;
+    void on_byte(std::uint8_t) {}
+};
+static_assert(stm32::drivers::UartHandler<NoIdleWithoutHook>);
+
+struct NotAUartHandler {};
+static_assert(!stm32::drivers::UartHandler<NotAUartHandler>);
 using UartConfig = stm32::hw::UartConfig<stm32::device::wl55::UartClockTraits>;
 
 // LPUART divider: BRR = 256 x f_ck / baud, rounded.

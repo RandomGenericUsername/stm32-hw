@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 
@@ -13,6 +14,24 @@ struct UartNullHandler {
     void on_byte(std::uint8_t) {}
     void on_idle() {}
 };
+
+// UART handler contract. on_byte(byte) is always required. on_idle() is
+// required only when the handler asks for IDLE interrupts.
+template <class H>
+concept UartIdleHandler = requires(H& handler) {
+    { handler.on_idle() } -> std::same_as<void>;
+};
+
+template <class H>
+concept UartHandler =
+    std::default_initializable<H> &&
+    requires {
+        { H::wants_idle } -> std::convertible_to<bool>;
+    } &&
+    requires(H& handler, std::uint8_t byte) {
+        { handler.on_byte(byte) } -> std::same_as<void>;
+    } &&
+    (!H::wants_idle || UartIdleHandler<H>);
 
 // Type-level UART driver with interrupt-driven TX and RX ring buffers.
 //
@@ -29,7 +48,7 @@ struct UartNullHandler {
 template <class HwUart,
           std::size_t TxCapacity = 128,
           std::size_t RxCapacity = TxCapacity,
-          class Handler = UartNullHandler>
+          UartHandler Handler = UartNullHandler>
 class UartDriver {
     static_assert(TxCapacity >= 2, "UART TX ring needs at least two slots");
     static_assert(RxCapacity >= 2, "UART RX ring needs at least two slots");

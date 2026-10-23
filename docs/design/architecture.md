@@ -206,7 +206,8 @@ The app owns:
 - ADC channel and sampling time
 - what to print or do with samples
 - IRQ priorities
-- optional compile-time event handlers
+- optional compile-time event handlers, constrained by the `AdcHandler` /
+  `UartHandler` concepts
 
 The app does not own:
 

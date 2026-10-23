@@ -6,13 +6,13 @@
 
 namespace stm32::drivers::h7 {
 
-template <class Handler = AdcNullHandler>
+template <AdcHandler Handler = AdcNullHandler>
 using Adc1 = AdcDriver<hw::H7Adc<device::h7::Adc1>, Handler>;
 
-template <class Handler = AdcNullHandler>
+template <AdcHandler Handler = AdcNullHandler>
 using Adc2 = AdcDriver<hw::H7Adc<device::h7::Adc2>, Handler>;
 
-template <class Handler = AdcNullHandler>
+template <AdcHandler Handler = AdcNullHandler>
 using Adc3 = AdcDriver<hw::H7Adc<device::h7::Adc3>, Handler>;
 
 } // namespace stm32::drivers::h7
